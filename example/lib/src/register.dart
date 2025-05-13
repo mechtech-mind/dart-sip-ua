@@ -188,7 +188,7 @@ class _MyRegisterWidget extends State<RegisterWidget>
   @override
   void callStateChanged(Call call, CallState state) {
     _logger.d('Call state changed: $state');
-    if (state.state == CallStateEnum.CALL_INITIATION && call.direction == Direction.incoming) {
+    if (state.state == CallStateEnum.CALL_INITIATION && call.direction == 'incoming') {
       _logger.i('Incoming call detected, showing CallKit notification...');
       showIncomingCall();
     }

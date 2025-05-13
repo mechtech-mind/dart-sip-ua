@@ -12,9 +12,9 @@ import 'package:sip_ua/sip_ua.dart';
 import 'widgets/action_button.dart';
 
 class DialPadWidget extends StatefulWidget {
-  final SIPUAHelper? _helper;
+  final SIPUAHelper _helper;
 
-  DialPadWidget(this._helper, {Key? key}) : super(key: key);
+  const DialPadWidget(this._helper, {Key? key}) : super(key: key);
 
   @override
   State<DialPadWidget> createState() => _MyDialPadWidget();
@@ -23,7 +23,7 @@ class DialPadWidget extends StatefulWidget {
 class _MyDialPadWidget extends State<DialPadWidget>
     implements SipUaHelperListener {
   String? _dest;
-  SIPUAHelper? get helper => widget._helper;
+  SIPUAHelper get helper => widget._helper;
   TextEditingController? _textController;
   late SharedPreferences _preferences;
   late SipUserCubit currentUserCubit;
@@ -40,6 +40,17 @@ class _MyDialPadWidget extends State<DialPadWidget>
     _loadSettings();
   }
 
+  void _bindEventListeners() {
+    helper.addSipUaHelperListener(this);
+  }
+
+  @override
+  void dispose() {
+    helper.removeSipUaHelperListener(this);
+    _textController?.dispose();
+    super.dispose();
+  }
+
   void _loadSettings() async {
     _preferences = await SharedPreferences.getInstance();
     _dest = _preferences.getString('dest') ?? 'sip:hello_jssip@tryit.jssip.net';
@@ -49,8 +60,60 @@ class _MyDialPadWidget extends State<DialPadWidget>
     setState(() {});
   }
 
-  void _bindEventListeners() {
-    helper!.addSipUaHelperListener(this);
+  void reRegisterWithCurrentUser() async {
+    if (currentUserCubit.state == null) return;
+    if (helper.registered) {
+      helper.unregister();
+    }
+    _logger.i("Re-registering");
+    currentUserCubit.register(currentUserCubit.state!);
+  }
+
+  @override
+  void registrationStateChanged(RegistrationState state) {
+    setState(() {
+      _logger.i("Registration state: ${state.state?.name}");
+    });
+  }
+
+  @override
+  void transportStateChanged(TransportState state) {
+    _logger.i("Transport state: ${state.state}");
+  }
+
+  @override
+  void callStateChanged(Call call, CallState callState) {
+    switch (callState.state) {
+      case CallStateEnum.CALL_INITIATION:
+        Navigator.pushNamed(context, '/callscreen', arguments: call);
+        break;
+      case CallStateEnum.FAILED:
+        reRegisterWithCurrentUser();
+        break;
+      case CallStateEnum.ENDED:
+        reRegisterWithCurrentUser();
+        break;
+      default:
+        break;
+    }
+  }
+
+  @override
+  void onNewMessage(SIPMessageRequest msg) {
+    String? msgBody = msg.request.body as String?;
+    setState(() {
+      receivedMsg = msgBody;
+    });
+  }
+
+  @override
+  void onNewNotify(Notify ntf) {
+    _logger.d("New notify: ${ntf.request?.method}");
+  }
+
+  @override
+  void onNewReinvite(ReInvite event) {
+    _logger.d("New reinvite");
   }
 
   Future<Widget?> _handleCall(BuildContext context,
@@ -348,55 +411,5 @@ class _MyDialPadWidget extends State<DialPadWidget>
         ],
       ),
     );
-  }
-
-  @override
-  void registrationStateChanged(RegistrationState state) {
-    setState(() {
-      _logger.i("Registration state: ${state.state?.name}");
-    });
-  }
-
-  @override
-  void transportStateChanged(TransportState state) {}
-
-  @override
-  void callStateChanged(Call call, CallState callState) {
-    switch (callState.state) {
-      case CallStateEnum.CALL_INITIATION:
-        Navigator.pushNamed(context, '/callscreen', arguments: call);
-        break;
-      case CallStateEnum.FAILED:
-        reRegisterWithCurrentUser();
-        break;
-      case CallStateEnum.ENDED:
-        reRegisterWithCurrentUser();
-        break;
-      default:
-    }
-  }
-
-  void reRegisterWithCurrentUser() async {
-    if (currentUserCubit.state == null) return;
-    if (helper!.registered) await helper!.unregister();
-    _logger.i("Re-registering");
-    currentUserCubit.register(currentUserCubit.state!);
-  }
-
-  @override
-  void onNewMessage(SIPMessageRequest msg) {
-    //Save the incoming message to DB
-    String? msgBody = msg.request.body as String?;
-    setState(() {
-      receivedMsg = msgBody;
-    });
-  }
-
-  @override
-  void onNewNotify(Notify ntf) {}
-
-  @override
-  void onNewReinvite(ReInvite event) {
-    // TODO: implement onNewReinvite
   }
 }
