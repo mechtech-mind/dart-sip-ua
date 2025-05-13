@@ -6,6 +6,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:logger/logger.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:uuid/uuid.dart';
 
 class RegisterWidget extends StatefulWidget {
   final SIPUAHelper? _helper;
@@ -49,9 +55,13 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   late SipUserCubit currentUser;
 
+  final _uuid = Uuid();
+  String? _currentUuid;
+
   @override
   void initState() {
     super.initState();
+    _currentUuid = _uuid.v4();
     _registerState = helper!.registerState;
     helper!.addSipUaHelperListener(this);
     _loadSettings();
@@ -172,6 +182,109 @@ class _MyRegisterWidget extends State<RegisterWidget>
     } catch (e) {
       _logger.e('Error during registration: $e');
       _alert(context, "Registration failed: $e");
+    }
+  }
+
+  @override
+  void callStateChanged(Call call, CallState state) {
+    _logger.d('Call state changed: $state');
+    if (state.state == CallStateEnum.CALL_INITIATION && call.direction == Direction.incoming) {
+      _logger.i('Incoming call detected, showing CallKit notification...');
+      showIncomingCall();
+    }
+  }
+
+  @override
+  void transportStateChanged(TransportState state) {
+    _logger.i('Transport state changed: $state');
+  }
+
+  @override
+  void onNewMessage(SIPMessageRequest msg) {
+    _logger.d('New message received: ${msg.request?.method}');
+  }
+
+  @override
+  void onNewNotify(Notify ntf) {
+    _logger.d('New notify received: ${ntf.request?.method}');
+  }
+
+  @override
+  void onNewReinvite(ReInvite event) {
+    _logger.d('New reinvite received');
+  }
+
+  Future<void> showIncomingCall() async {
+    final _uuid = Uuid();
+    final _currentUuid = _uuid.v4();
+    _logger.i('showIncomingCall called, uuid: $_currentUuid');
+    try {
+      _logger.d('Requesting notification permission for CallKit...');
+      await FlutterCallkitIncoming.requestNotificationPermission({
+        "rationaleMessagePermission": "Notification permission is required, to show notification.",
+        "postNotificationMessageRequired": "Notification permission is required, Please allow notification permission from setting."
+      });
+      _logger.d('Notification permission requested. Building CallKitParams...');
+
+      final callKitParams = CallKitParams(
+        id: _currentUuid,
+        nameCaller: 'Hien Nguyen',
+        appName: 'Callkit',
+        avatar: 'https://i.pravatar.cc/100',
+        handle: '0123456789',
+        type: 0,
+        textAccept: 'Accept',
+        textDecline: 'Decline',
+        missedCallNotification: NotificationParams(
+          showNotification: true,
+          isShowCallback: true,
+          subtitle: 'Missed call',
+          callbackText: 'Call back',
+        ),
+        callingNotification: NotificationParams(
+          showNotification: true,
+          isShowCallback: true,
+          subtitle: 'Calling...',
+          callbackText: 'Hang Up',
+        ),
+        duration: 30000,
+        extra: <String, dynamic>{'userId': '1a2b3c4d'},
+        headers: <String, dynamic>{'apiKey': 'Abc@123!', 'platform': 'flutter'},
+        android: AndroidParams(
+          isCustomNotification: true,
+          isShowLogo: false,
+          logoUrl: 'https://i.pravatar.cc/100',
+          ringtonePath: 'system_ringtone_default',
+          backgroundColor: '#0955fa',
+          backgroundUrl: 'https://i.pravatar.cc/500',
+          actionColor: '#4CAF50',
+          textColor: '#ffffff',
+          incomingCallNotificationChannelName: "Incoming Call",
+          missedCallNotificationChannelName: "Missed Call",
+          isShowCallID: false,
+        ),
+        ios: IOSParams(
+          iconName: 'CallKitLogo',
+          handleType: 'generic',
+          supportsVideo: true,
+          maximumCallGroups: 2,
+          maximumCallsPerCallGroup: 1,
+          audioSessionMode: 'default',
+          audioSessionActive: true,
+          audioSessionPreferredSampleRate: 44100.0,
+          audioSessionPreferredIOBufferDuration: 0.005,
+          supportsDTMF: true,
+          supportsHolding: true,
+          supportsGrouping: false,
+          supportsUngrouping: false,
+          ringtonePath: 'system_ringtone_default',
+        ),
+      );
+      _logger.d('CallKitParams built. Showing CallKit incoming notification...');
+      await FlutterCallkitIncoming.showCallkitIncoming(callKitParams);
+      _logger.i('CallKit incoming notification shown successfully.');
+    } catch (e, s) {
+      _logger.e('Error in showIncomingCall: $e', error: e, stackTrace: s);
     }
   }
 
@@ -341,30 +454,5 @@ class _MyRegisterWidget extends State<RegisterWidget>
         ],
       ),
     );
-  }
-
-  @override
-  void callStateChanged(Call call, CallState state) {
-    _logger.d('Call state changed: $state');
-  }
-
-  @override
-  void transportStateChanged(TransportState state) {
-    _logger.i('Transport state changed: $state');
-  }
-
-  @override
-  void onNewMessage(SIPMessageRequest msg) {
-    _logger.d('New message received: ${msg.request?.method}');
-  }
-
-  @override
-  void onNewNotify(Notify ntf) {
-    _logger.d('New notify received: ${ntf.request?.method}');
-  }
-
-  @override
-  void onNewReinvite(ReInvite event) {
-    _logger.d('New reinvite received');
   }
 }
