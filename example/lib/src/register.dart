@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:logger/logger.dart';
 
 class RegisterWidget extends StatefulWidget {
   final SIPUAHelper? _helper;
@@ -17,6 +18,17 @@ class RegisterWidget extends StatefulWidget {
 
 class _MyRegisterWidget extends State<RegisterWidget>
     implements SipUaHelperListener {
+  final _logger = Logger(
+    printer: PrettyPrinter(
+      methodCount: 2,
+      errorMethodCount: 8,
+      lineLength: 120,
+      colors: true,
+      printEmojis: true,
+      printTime: true
+    ),
+  );
+
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _portController = TextEditingController();
   final TextEditingController _wsUriController = TextEditingController();
@@ -70,18 +82,24 @@ class _MyRegisterWidget extends State<RegisterWidget>
     setState(() {
       _portController.text = '5060';
       _wsUriController.text =
-          _preferences.getString('ws_uri') ?? 'wss://tryit.jssip.net:10443';
+          _preferences.getString('ws_uri') ?? 'ws://94.130.104.22:8088/anatel/ws';
       _sipUriController.text =
-          _preferences.getString('sip_uri') ?? 'hello_flutter@tryit.jssip.net';
+          _preferences.getString('sip_uri') ?? 'sip:3488@94.130.104.22';
       _displayNameController.text =
           _preferences.getString('display_name') ?? 'Flutter SIP UA';
-      _passwordController.text = _preferences.getString('password') ?? '';
+      _passwordController.text = _preferences.getString('password') ?? 'Awzvzhrd';
       _authorizationUserController.text =
-          _preferences.getString('auth_user') ?? '';
+          _preferences.getString('auth_user') ?? '3488';
     });
   }
 
   void _saveSettings() {
+    _logger.i('Saving settings with current values:');
+    _logger.d('WS URI: ${_wsUriController.text}');
+    _logger.d('SIP URI: ${_sipUriController.text}');
+    _logger.d('Auth User: ${_authorizationUserController.text}');
+    _logger.d('Password: ${_passwordController.text}');
+    
     _preferences.setString('port', _portController.text);
     _preferences.setString('ws_uri', _wsUriController.text);
     _preferences.setString('sip_uri', _sipUriController.text);
@@ -92,6 +110,7 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   @override
   void registrationStateChanged(RegistrationState state) {
+    _logger.i('Registration state changed: ${state.state?.name}');
     setState(() {
       _registerState = state;
     });
@@ -119,21 +138,41 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   void _register(BuildContext context) {
     if (_wsUriController.text == '') {
+      _logger.w('WebSocket URL is empty');
       _alert(context, "WebSocket URL");
+      return;
     } else if (_sipUriController.text == '') {
+      _logger.w('SIP URI is empty');
       _alert(context, "SIP URI");
+      return;
     }
+
+    _logger.i('Registering with current values:');
+    _logger.d('WS URL: ${_wsUriController.text}');
+    _logger.d('SIP URI: ${_sipUriController.text}');
+    _logger.d('Transport: $_selectedTransport');
+    _logger.d('Auth User: ${_authorizationUserController.text}');
+    _logger.d('Display Name: ${_displayNameController.text}');
 
     _saveSettings();
 
-       currentUser.register(SipUser(
+    try {
+      _logger.i('Attempting to register with SIP server...');
+      currentUser.register(SipUser(
+        wsUrl: _wsUriController.text,
         selectedTransport: _selectedTransport,
         wsExtraHeaders: _wsExtraHeaders,
         sipUri: _sipUriController.text,
         port: _portController.text,
         displayName: _displayNameController.text,
         password: _passwordController.text,
-        authUser: _authorizationUserController.text));
+        authUser: _authorizationUserController.text,
+      ));
+      _logger.i('Registration request sent successfully');
+    } catch (e) {
+      _logger.e('Error during registration: $e');
+      _alert(context, "Registration failed: $e");
+    }
   }
 
   @override
@@ -306,24 +345,26 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   @override
   void callStateChanged(Call call, CallState state) {
-    //NO OP
+    _logger.d('Call state changed: $state');
   }
 
   @override
-  void transportStateChanged(TransportState state) {}
+  void transportStateChanged(TransportState state) {
+    _logger.i('Transport state changed: $state');
+  }
 
   @override
   void onNewMessage(SIPMessageRequest msg) {
-    // NO OP
+    _logger.d('New message received: ${msg.request?.method}');
   }
 
   @override
   void onNewNotify(Notify ntf) {
-    // NO OP
+    _logger.d('New notify received: ${ntf.request?.method}');
   }
 
   @override
   void onNewReinvite(ReInvite event) {
-    // TODO: implement onNewReinvite
+    _logger.d('New reinvite received');
   }
 }

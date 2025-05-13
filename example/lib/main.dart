@@ -7,6 +7,7 @@ import 'package:logger/logger.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import 'package:sip_ua/sip_ua.dart';
+import 'package:sip_ua/src/logger.dart' show Log;
 
 import 'src/about.dart';
 import 'src/callscreen.dart';
@@ -14,7 +15,12 @@ import 'src/dialpad.dart';
 import 'src/register.dart';
 
 void main() {
-  Logger.level = Level.warning;
+  // Set logger to show all levels
+  Logger.level = Level.debug;
+  
+  // Enable SIP message logging
+  Log.loggingLevel = Level.debug;
+  
   if (WebRTC.platformIsDesktop) {
     debugDefaultTargetPlatformOverride = TargetPlatform.fuchsia;
   }
