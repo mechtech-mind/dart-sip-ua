@@ -7,6 +7,8 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:logger/logger.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:uuid/uuid.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class CallService {
   final _logger = Logger(
@@ -30,34 +32,60 @@ class CallService {
 
   void _setupCallKitListeners() {
     FlutterCallkitIncoming.onEvent.listen((event) {
+      _logger.w('CallKit event runtimeType: \\${event.runtimeType}');
+      _logger.w('CallKit event toString: \\${event.toString()}');
+      try {
+        _logger.w('CallKit event as Map: \\${event is Map ? event : 'Not a Map'}');
+        _logger.w('CallKit event.event: \\${(event as dynamic).event}');
+        _logger.w('CallKit event.body: \\${(event as dynamic).body}');
+        if (event is Map<String, dynamic>) {
+          final mapEvent = event as Map<String, dynamic>;
+          _logger.w('CallKit event["event"]: \\${mapEvent["event"]}');
+          _logger.w('CallKit event["body"]: \\${mapEvent["body"]}');
+        } else {
+          _logger.w('CallKit event["event"]: Not a Map');
+          _logger.w('CallKit event["body"]: Not a Map');
+        }
+      } catch (e) {
+        _logger.w('Error accessing event properties: $e');
+      }
+
+      String? eventType;
+      dynamic params;
       if (event is Map) {
         final mapEvent = event as Map;
-        final eventType = mapEvent['event'];
-        final params = mapEvent['body'] ?? mapEvent['params'] ?? mapEvent;
-        _logger.i('CallKit event: $eventType');
-        if (eventType == 'ACTION_CALL_ACCEPT') {
-          _handleCallAccept(params);
-        } else if (eventType == 'ACTION_CALL_DECLINE') {
-          _handleCallDecline(params);
-        } else if (eventType == 'ACTION_CALL_ENDED') {
-          _handleCallEnded(params);
-        } else if (eventType == 'ACTION_CALL_TIMEOUT') {
-          _handleCallTimeout(params);
-        } else if (eventType == 'ACTION_CALL_CALLBACK') {
-          _handleCallCallback(params);
-        } else if (eventType == 'ACTION_CALL_TOGGLE_HOLD') {
-          _handleCallToggleHold(params);
-        } else if (eventType == 'ACTION_CALL_TOGGLE_MUTE') {
-          _handleCallToggleMute(params);
-        } else if (eventType == 'ACTION_CALL_TOGGLE_DMTF') {
-          _handleCallToggleDMTF(params);
-        } else if (eventType == 'ACTION_CALL_TOGGLE_GROUP') {
-          _handleCallToggleGroup(params);
-        } else if (eventType == 'ACTION_CALL_TOGGLE_AUDIO_SESSION') {
-          _handleCallToggleAudioSession(params);
-        }
+        eventType = mapEvent['event'];
+        params = mapEvent['body'] ?? mapEvent['params'] ?? mapEvent;
       } else {
-        _logger.w('CallKit event is not a Map: $event');
+        // For CallEvent object
+        try {
+          eventType = (event as dynamic).event?.toString();
+          params = (event as dynamic).body;
+        } catch (e) {
+          _logger.w('Unknown CallKit event structure: $event');
+        }
+      }
+      _logger.i('[CallKit] Received event: $eventType, params: $params');
+      if (eventType == 'ACTION_CALL_ACCEPT' || eventType == 'Event.actionCallAccept') {
+        _handleCallAccept(params);
+      } else if (eventType == 'ACTION_CALL_DECLINE' || eventType == 'Event.actionCallDecline') {
+        _handleCallDecline(params);
+      } else if (eventType == 'ACTION_CALL_ENDED' || eventType == 'Event.actionCallEnded') {
+        _handleCallEnded(params);
+      } else if (eventType == 'ACTION_CALL_TIMEOUT' || eventType == 'Event.actionCallTimeout') {
+        _handleCallTimeout(params);
+      } else if (eventType == 'ACTION_CALL_CALLBACK' || eventType == 'Event.actionCallCallback') {
+        _handleCallCallback(params);
+      } else if (eventType == 'ACTION_CALL_TOGGLE_HOLD' || eventType == 'Event.actionCallToggleHold') {
+        _handleCallToggleHold(params);
+      } else if (eventType == 'ACTION_CALL_TOGGLE_MUTE' || eventType == 'Event.actionCallToggleMute') {
+        _handleCallToggleMute(params);
+      } else if (eventType == 'ACTION_CALL_TOGGLE_DMTF' || eventType == 'Event.actionCallToggleDMTF') {
+        _handleCallToggleDMTF(params);
+      } else if (eventType == 'ACTION_CALL_TOGGLE_GROUP' || eventType == 'Event.actionCallToggleGroup') {
+        _handleCallToggleGroup(params);
+      } else if (eventType == 'ACTION_CALL_TOGGLE_AUDIO_SESSION' || eventType == 'Event.actionCallToggleAudioSession') {
+        _handleCallToggleAudioSession(params);
       }
     });
   }
@@ -91,7 +119,8 @@ class CallService {
     required String callerName,
     required String callerNumber,
   }) async {
-    _logger.i('Showing incoming call UI for call: $callId');
+    _logger.i('[CallKit] showIncomingCall called with SIP call id: $callId, callerName: $callerName, callerNumber: $callerNumber');
+    _logger.i('[CallKit] Showing incoming call for SIP call id: $callId');
     try {
       await FlutterCallkitIncoming.requestNotificationPermission({
         "rationaleMessagePermission": "Notification permission is required, to show notification.",
@@ -120,7 +149,7 @@ class CallService {
           callbackText: 'Hang Up',
         ),
         duration: 30000,
-        extra: <String, dynamic>{'call_id': callId},
+        extra: <String, dynamic>{'sip_call_id': callId},
         headers: <String, dynamic>{'platform': 'flutter'},
         android: AndroidParams(
           isCustomNotification: true,
@@ -153,26 +182,78 @@ class CallService {
       );
 
       await FlutterCallkitIncoming.showCallkitIncoming(params);
-      _logger.i('CallKit incoming call UI shown successfully');
+      _logger.i('[CallKit] showCallkitIncoming completed for SIP call id: $callId');
     } catch (e, s) {
       _logger.e('Error showing incoming call UI: $e\n$s');
     }
   }
 
-  void _handleCallAccept(dynamic params) {
-    _logger.i('Call accepted: ${params?['id']}');
-    // Accept the SIP call
-    final call = _sipHelper.findCall(params?['id']);
-    if (call != null) {
-      _logger.d('Found call, checking current state: ${call.state}');
-      if (call.state == CallStateEnum.CALL_INITIATION) {
-        _logger.d('Call is in CALL_INITIATION state, proceeding with answer');
-        call.answer({});
+  Future<void> answerCallWithMedia(Call call, SIPUAHelper helper) async {
+    final remoteHasVideo = call.remote_has_video;
+    final mediaConstraints = <String, dynamic>{
+      'audio': true,
+      'video': remoteHasVideo
+          ? {
+              'mandatory': <String, dynamic>{
+                'minWidth': '640',
+                'minHeight': '480',
+                'minFrameRate': '30',
+              },
+              'facingMode': 'user',
+              'optional': <dynamic>[],
+            }
+          : false
+    };
+
+    MediaStream mediaStream;
+    try {
+      if (kIsWeb && remoteHasVideo) {
+        mediaStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
+        MediaStream userStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        mediaStream.addTrack(userStream.getAudioTracks()[0], addToNative: true);
       } else {
-        _logger.w('Call is not in CALL_INITIATION state, current state: ${call.state}');
+        if (!remoteHasVideo) {
+          mediaConstraints['video'] = false;
+        }
+        mediaStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      }
+      _logger.d('Successfully obtained media stream for answering call');
+    } catch (e) {
+      _logger.e('Error getting media stream for answering call: $e');
+      return;
+    }
+
+    try {
+      call.answer(helper.buildCallOptions(!remoteHasVideo), mediaStream: mediaStream);
+      _logger.d('Call answered with media stream');
+    } catch (e) {
+      _logger.e('Error calling answer() with media stream: $e');
+    }
+  }
+
+  void _handleCallAccept(dynamic params) async {
+    String? sipCallId;
+    if (params is Map && params['extra'] != null && params['extra']['sip_call_id'] != null) {
+      sipCallId = params['extra']['sip_call_id'];
+    } else if (params is Map && params['id'] != null) {
+      sipCallId = params['id'];
+    }
+    _logger.i('[CallKit] Accept pressed. Extracted SIP call id: $sipCallId');
+    if (sipCallId != null) {
+      final call = _sipHelper.findCall(sipCallId);
+      if (call != null) {
+        _logger.i('[CallKit] Found SIP call for id: $sipCallId, state: ${call.state}');
+        if (call.state == CallStateEnum.CALL_INITIATION) {
+          _logger.d('Call is in CALL_INITIATION state, proceeding with answer');
+          await answerCallWithMedia(call, _sipHelper);
+        } else {
+          _logger.w('Call is not in CALL_INITIATION state, current state: ${call.state}');
+        }
+      } else {
+        _logger.e('[CallKit] No SIP call found for id: $sipCallId');
       }
     } else {
-      _logger.e('Call not found for id: ${params?['id']}');
+      _logger.e('[CallKit] No SIP call id found in params for CallKit accept event.');
     }
   }
 

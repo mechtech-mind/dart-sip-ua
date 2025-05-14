@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:dart_sip_ua_example/src/utils/logger.dart';
+import 'services/call_service.dart';
 
 import 'widgets/action_button.dart';
 
@@ -44,6 +45,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   late String _transferTarget;
   late Timer _timer;
+  late CallService? _callService;
 
   SIPUAHelper? get helper => widget._helper;
 
@@ -60,6 +62,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
     helper!.addSipUaHelperListener(this);
     _startTimer();
     AppLogger.d('initState: call.direction = \\${call!.direction}');
+    _callService = CallService(helper!);
   }
 
   @override
@@ -233,53 +236,8 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   void _handleAccept() async {
     AppLogger.d('Starting call acceptance process');
-    bool remoteHasVideo = call!.remote_has_video;
-    AppLogger.d('Remote has video: $remoteHasVideo');
-    
-    final mediaConstraints = <String, dynamic>{
-      'audio': true,
-      'video': remoteHasVideo
-          ? {
-              'mandatory': <String, dynamic>{
-                'minWidth': '640',
-                'minHeight': '480',
-                'minFrameRate': '30',
-              },
-              'facingMode': 'user',
-              'optional': <dynamic>[],
-            }
-          : false
-    };
-    AppLogger.d('Media constraints: $mediaConstraints');
-    
-    MediaStream mediaStream;
-    try {
-      if (kIsWeb && remoteHasVideo) {
-        AppLogger.d('Getting display media for web');
-        mediaStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
-        AppLogger.d('Getting user media for web');
-        MediaStream userStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-        AppLogger.d('Adding audio track to display media');
-        mediaStream.addTrack(userStream.getAudioTracks()[0], addToNative: true);
-      } else {
-        if (!remoteHasVideo) {
-          mediaConstraints['video'] = false;
-        }
-        AppLogger.d('Getting user media with constraints: $mediaConstraints');
-        mediaStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
-      }
-      AppLogger.d('Successfully obtained media stream');
-    } catch (e) {
-      AppLogger.e('Error getting media stream: $e');
-      return;
-    }
-
-    try {
-      AppLogger.d('Calling answer() with media stream');
-      call!.answer(helper!.buildCallOptions(!remoteHasVideo), mediaStream: mediaStream);
-      AppLogger.d('answer() called successfully');
-    } catch (e) {
-      AppLogger.e('Error calling answer(): $e');
+    if (_callService != null && call != null && helper != null) {
+      await _callService!.answerCallWithMedia(call!, helper!);
     }
   }
 
