@@ -1,17 +1,20 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sip_ua/sip_ua.dart';
-import 'utils/logger.dart';
+import 'package:dart_sip_ua_example/src/utils/logger.dart';
 
 import 'widgets/action_button.dart';
+
+/// Temporary fix: Direction enum definition
 
 class CallScreenWidget extends StatefulWidget {
   final SIPUAHelper? _helper;
   final Call? _call;
 
+  
   CallScreenWidget(this._helper, this._call, {Key? key}) : super(key: key);
 
   @override
@@ -48,29 +51,25 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   String? get remoteIdentity => call!.remote_identity;
 
-  String? get direction => call!.direction;
-
   Call? get call => widget._call;
 
   @override
   initState() {
     super.initState();
-    AppLogger.i('Initializing CallScreen');
     _initRenderers();
     helper!.addSipUaHelperListener(this);
     _startTimer();
+    AppLogger.d('initState: call.direction = \\${call!.direction}');
   }
 
   @override
   deactivate() {
     super.deactivate();
-    AppLogger.i('Deactivating CallScreen');
     helper!.removeSipUaHelperListener(this);
     _disposeRenderers();
   }
 
   void _startTimer() {
-    AppLogger.d('Starting call timer');
     _timer = Timer.periodic(Duration(seconds: 1), (Timer timer) {
       Duration duration = Duration(seconds: timer.tick);
       if (mounted) {
@@ -79,13 +78,11 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
             .join(':');
       } else {
         _timer.cancel();
-        AppLogger.d('Timer cancelled - widget not mounted');
       }
     });
   }
 
   void _initRenderers() async {
-    AppLogger.d('Initializing video renderers');
     if (_localRenderer != null) {
       await _localRenderer!.initialize();
     }
@@ -95,7 +92,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _disposeRenderers() {
-    AppLogger.d('Disposing video renderers');
     if (_localRenderer != null) {
       _localRenderer!.dispose();
       _localRenderer = null;
@@ -108,13 +104,15 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   @override
   void callStateChanged(Call call, CallState callState) {
-    AppLogger.d('Call state changed: ${callState.state}');
+    AppLogger.d('Call state changed: \\${callState.state}');
+    AppLogger.d('Previous state: \\$_state');
+    AppLogger.d('Call direction (call.direction): \\${call.direction}');
+    AppLogger.d('Call originator: \\${callState.originator}');
     
     if (callState.state == CallStateEnum.HOLD ||
         callState.state == CallStateEnum.UNHOLD) {
       _hold = callState.state == CallStateEnum.HOLD;
       _holdOriginator = callState.originator;
-      AppLogger.i('Call ${_hold ? 'held' : 'unheld'} by ${_holdOriginator}');
       setState(() {});
       return;
     }
@@ -122,7 +120,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
     if (callState.state == CallStateEnum.MUTED) {
       if (callState.audio!) _audioMuted = true;
       if (callState.video!) _videoMuted = true;
-      AppLogger.i('Call muted - audio: ${callState.audio}, video: ${callState.video}');
       setState(() {});
       return;
     }
@@ -130,12 +127,12 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
     if (callState.state == CallStateEnum.UNMUTED) {
       if (callState.audio!) _audioMuted = false;
       if (callState.video!) _videoMuted = false;
-      AppLogger.i('Call unmuted - audio: ${callState.audio}, video: ${callState.video}');
       setState(() {});
       return;
     }
 
     if (callState.state != CallStateEnum.STREAM) {
+      AppLogger.d('Updating call state from $_state to ${callState.state}');
       _state = callState.state;
     }
 
@@ -146,7 +143,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
         break;
       case CallStateEnum.ENDED:
       case CallStateEnum.FAILED:
-        AppLogger.i('Call ended/failed - returning to dialpad');
+        AppLogger.d('Call ended/failed, going back to dial pad');
         _backToDialPad();
         break;
       case CallStateEnum.UNMUTED:
@@ -155,7 +152,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
       case CallStateEnum.PROGRESS:
       case CallStateEnum.ACCEPTED:
       case CallStateEnum.CONFIRMED:
-        AppLogger.i('Call confirmed');
+        AppLogger.d('Call state updated: ${callState.state}');
         setState(() => _callConfirmed = true);
         break;
       case CallStateEnum.HOLD:
@@ -163,6 +160,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
       case CallStateEnum.NONE:
       case CallStateEnum.CALL_INITIATION:
       case CallStateEnum.REFER:
+        AppLogger.d('Call state updated: ${callState.state}');
         break;
     }
   }
@@ -191,10 +189,8 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _handleStreams(CallState event) async {
-    AppLogger.d('Handling call streams');
     MediaStream? stream = event.stream;
     if (event.originator == 'local') {
-      AppLogger.d('Setting up local stream');
       if (_localRenderer != null) {
         _localRenderer!.srcObject = stream;
       }
@@ -207,7 +203,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
       _localStream = stream;
     }
     if (event.originator == 'remote') {
-      AppLogger.d('Setting up remote stream');
       if (_remoteRenderer != null) {
         _remoteRenderer!.srcObject = stream;
       }
@@ -232,14 +227,15 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _handleHangup() {
-    AppLogger.i('Hanging up call');
     call!.hangup({'status_code': 603});
     _timer.cancel();
   }
 
   void _handleAccept() async {
-    AppLogger.i('Accepting call');
+    AppLogger.d('Starting call acceptance process');
     bool remoteHasVideo = call!.remote_has_video;
+    AppLogger.d('Remote has video: $remoteHasVideo');
+    
     final mediaConstraints = <String, dynamic>{
       'audio': true,
       'video': remoteHasVideo
@@ -254,34 +250,40 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
             }
           : false
     };
+    AppLogger.d('Media constraints: $mediaConstraints');
+    
     MediaStream mediaStream;
-
     try {
       if (kIsWeb && remoteHasVideo) {
         AppLogger.d('Getting display media for web');
-        mediaStream =
-            await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
-        MediaStream userStream =
-            await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        mediaStream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
+        AppLogger.d('Getting user media for web');
+        MediaStream userStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        AppLogger.d('Adding audio track to display media');
         mediaStream.addTrack(userStream.getAudioTracks()[0], addToNative: true);
       } else {
         if (!remoteHasVideo) {
           mediaConstraints['video'] = false;
         }
-        AppLogger.d('Getting user media');
+        AppLogger.d('Getting user media with constraints: $mediaConstraints');
         mediaStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
       }
+      AppLogger.d('Successfully obtained media stream');
+    } catch (e) {
+      AppLogger.e('Error getting media stream: $e');
+      return;
+    }
 
-      call!.answer(helper!.buildCallOptions(!remoteHasVideo),
-          mediaStream: mediaStream);
-      AppLogger.i('Call accepted successfully');
-    } catch (e, stackTrace) {
-      AppLogger.e('Error accepting call', e, stackTrace);
+    try {
+      AppLogger.d('Calling answer() with media stream');
+      call!.answer(helper!.buildCallOptions(!remoteHasVideo), mediaStream: mediaStream);
+      AppLogger.d('answer() called successfully');
+    } catch (e) {
+      AppLogger.e('Error calling answer(): $e');
     }
   }
 
   void _switchCamera() {
-    AppLogger.d('Switching camera');
     if (_localStream != null) {
       Helper.switchCamera(_localStream!.getVideoTracks()[0]);
       setState(() {
@@ -291,7 +293,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _muteAudio() {
-    AppLogger.d('Toggling audio mute');
     if (_audioMuted) {
       call!.unmute(true, false);
     } else {
@@ -300,7 +301,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _muteVideo() {
-    AppLogger.d('Toggling video mute');
     if (_videoMuted) {
       call!.unmute(false, true);
     } else {
@@ -309,7 +309,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _handleHold() {
-    AppLogger.d('Toggling call hold');
     if (_hold) {
       call!.unhold();
     } else {
@@ -318,7 +317,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _handleTransfer() {
-    AppLogger.d('Initiating call transfer');
     showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -340,7 +338,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
             TextButton(
               child: Text('Ok'),
               onPressed: () {
-                AppLogger.i('Transferring call to: $_transferTarget');
                 call!.refer(_transferTarget);
                 Navigator.of(context).pop();
               },
@@ -358,19 +355,17 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   }
 
   void _handleDtmf(String tone) {
-    AppLogger.d('Sending DTMF tone: $tone');
+    print('Dtmf tone => $tone');
     call!.sendDTMF(tone);
   }
 
   void _handleKeyPad() {
-    AppLogger.d('Toggling keypad');
     setState(() {
       _showNumPad = !_showNumPad;
     });
   }
 
   void _handleVideoUpgrade() {
-    AppLogger.d('Handling video upgrade');
     if (voiceOnly) {
       setState(() {
         call!.voiceOnly = false;
@@ -378,21 +373,16 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
       helper!.renegotiate(
           call: call!,
           voiceOnly: false,
-          done: (IncomingMessage? incomingMessage) {
-            AppLogger.d('Video upgrade negotiation completed');
-          });
+          done: (IncomingMessage? incomingMessage) {});
     } else {
       helper!.renegotiate(
           call: call!,
           voiceOnly: true,
-          done: (IncomingMessage? incomingMessage) {
-            AppLogger.d('Voice only negotiation completed');
-          });
+          done: (IncomingMessage? incomingMessage) {});
     }
   }
 
   void _toggleSpeaker() {
-    AppLogger.d('Toggling speaker');
     if (_localStream != null) {
       _speakerOn = !_speakerOn;
       if (!kIsWeb) {
@@ -463,7 +453,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
     switch (_state) {
       case CallStateEnum.NONE:
       case CallStateEnum.CONNECTING:
-        if (direction == 'incoming') {
+        if (call!.direction == 'INCOMING') {
           basicActions.add(ActionButton(
             title: "Accept",
             fillColor: Colors.green,
@@ -648,7 +638,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
                       child: Text(
                         (voiceOnly ? 'VOICE CALL' : 'VIDEO CALL') +
                             (_hold
-                                ? ' PAUSED BY ${_holdOriginator}'
+                                ? ' PAUSED BY ${_holdOriginator!}'
                                 : ''),
                         style: TextStyle(fontSize: 24, color: textColor),
                       ),
@@ -695,7 +685,7 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: Text('[$direction] ${_state.name}'),
+        title: Text('[${call!.direction}] $_state'),
       ),
       body: _buildContent(),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -709,7 +699,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   @override
   void onNewReinvite(ReInvite event) {
-    AppLogger.d('Received reinvite request');
     if (event.accept == null) return;
     if (event.reject == null) return;
     if (voiceOnly && (event.hasVideo ?? false)) {
@@ -726,7 +715,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
               TextButton(
                 child: const Text('Cancel'),
                 onPressed: () {
-                  AppLogger.i('Rejecting video upgrade');
                   event.reject!.call({'status_code': 607});
                   Navigator.of(context).pop();
                 },
@@ -734,7 +722,6 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
               TextButton(
                 child: const Text('OK'),
                 onPressed: () {
-                  AppLogger.i('Accepting video upgrade');
                   event.accept!.call({});
                   setState(() {
                     call!.voiceOnly = false;
@@ -752,11 +739,11 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
 
   @override
   void onNewMessage(SIPMessageRequest msg) {
-    AppLogger.d('Received new SIP message');
+    // NO OP
   }
 
   @override
   void onNewNotify(Notify ntf) {
-    AppLogger.d('Received new SIP notify');
+    // NO OP
   }
 }

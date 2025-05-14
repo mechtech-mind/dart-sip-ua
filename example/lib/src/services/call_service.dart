@@ -164,7 +164,15 @@ class CallService {
     // Accept the SIP call
     final call = _sipHelper.findCall(params?['id']);
     if (call != null) {
-      call.answer({});
+      _logger.d('Found call, checking current state: ${call.state}');
+      if (call.state == CallStateEnum.CALL_INITIATION) {
+        _logger.d('Call is in CALL_INITIATION state, proceeding with answer');
+        call.answer({});
+      } else {
+        _logger.w('Call is not in CALL_INITIATION state, current state: ${call.state}');
+      }
+    } else {
+      _logger.e('Call not found for id: ${params?['id']}');
     }
   }
 
@@ -173,7 +181,10 @@ class CallService {
     // Decline the SIP call
     final call = _sipHelper.findCall(params?['id']);
     if (call != null) {
+      _logger.d('Found call, checking current state: ${call.state}');
       call.hangup();
+    } else {
+      _logger.e('Call not found for id: ${params?['id']}');
     }
   }
 
@@ -182,7 +193,10 @@ class CallService {
     // End the SIP call
     final call = _sipHelper.findCall(params?['id']);
     if (call != null) {
+      _logger.d('Found call, checking current state: ${call.state}');
       call.hangup();
+    } else {
+      _logger.e('Call not found for id: ${params?['id']}');
     }
   }
 

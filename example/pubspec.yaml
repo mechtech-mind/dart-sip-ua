@@ -19,7 +19,6 @@ environment:
   flutter: ">=1.10.0"
 
 dependencies:
-  bloc: ^9.0.0
   flutter:
     sdk: flutter
   sip_ua: ^1.0.1
@@ -34,6 +33,7 @@ dependencies:
   firebase_core: ^2.24.2
   firebase_messaging: ^14.7.10
   flutter_local_notifications: ^16.3.0
+  bloc: ^9.0.0
 
 dev_dependencies:
   flutter_test:
