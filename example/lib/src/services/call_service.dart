@@ -9,6 +9,9 @@ import 'package:sip_ua/sip_ua.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
+import 'package:dart_sip_ua_example/src/services/sip_handler.dart';
 
 class CallService {
   final _logger = Logger(
@@ -25,30 +28,19 @@ class CallService {
   final SIPUAHelper _sipHelper;
   final _uuid = Uuid();
 
-  CallService(this._sipHelper) {
+  // --- Auto-answer state ---
+  bool _shouldAutoAnswer = false;
+  String? _expectedSipUri;
+  Timer? _autoAnswerTimer;
+
+  CallService([SIPUAHelper? helper]) : _sipHelper = SipHandler.instance.helper {
     _setupCallKitListeners();
     _setupFCMListeners();
   }
 
   void _setupCallKitListeners() {
     FlutterCallkitIncoming.onEvent.listen((event) {
-      _logger.w('CallKit event runtimeType: \\${event.runtimeType}');
-      _logger.w('CallKit event toString: \\${event.toString()}');
-      try {
-        _logger.w('CallKit event as Map: \\${event is Map ? event : 'Not a Map'}');
-        _logger.w('CallKit event.event: \\${(event as dynamic).event}');
-        _logger.w('CallKit event.body: \\${(event as dynamic).body}');
-        if (event is Map<String, dynamic>) {
-          final mapEvent = event as Map<String, dynamic>;
-          _logger.w('CallKit event["event"]: \\${mapEvent["event"]}');
-          _logger.w('CallKit event["body"]: \\${mapEvent["body"]}');
-        } else {
-          _logger.w('CallKit event["event"]: Not a Map');
-          _logger.w('CallKit event["body"]: Not a Map');
-        }
-      } catch (e) {
-        _logger.w('Error accessing event properties: $e');
-      }
+      
 
       String? eventType;
       dynamic params;
@@ -118,8 +110,9 @@ class CallService {
     required String callId,
     required String callerName,
     required String callerNumber,
+    String? sipUri,
   }) async {
-    _logger.i('[CallKit] showIncomingCall called with SIP call id: $callId, callerName: $callerName, callerNumber: $callerNumber');
+    _logger.i('[CallKit] showIncomingCall called with SIP call id: $callId, callerName: $callerName, callerNumber: $callerNumber, sipUri: $sipUri');
     _logger.i('[CallKit] Showing incoming call for SIP call id: $callId');
     try {
       await FlutterCallkitIncoming.requestNotificationPermission({
@@ -149,7 +142,10 @@ class CallService {
           callbackText: 'Hang Up',
         ),
         duration: 30000,
-        extra: <String, dynamic>{'sip_call_id': callId},
+        extra: <String, dynamic>{
+          'sip_call_id': callId,
+          if (sipUri != null) 'sip_uri': sipUri,
+        },
         headers: <String, dynamic>{'platform': 'flutter'},
         android: AndroidParams(
           isCustomNotification: true,
@@ -188,7 +184,7 @@ class CallService {
     }
   }
 
-  Future<void> answerCallWithMedia(Call call, SIPUAHelper helper) async {
+  Future<void> answerCallWithMedia(Call call) async {
     final remoteHasVideo = call.remote_has_video;
     final mediaConstraints = <String, dynamic>{
       'audio': true,
@@ -224,7 +220,8 @@ class CallService {
     }
 
     try {
-      call.answer(helper.buildCallOptions(!remoteHasVideo), mediaStream: mediaStream);
+      final options = SipHandler.instance.helper.buildCallOptions(!remoteHasVideo);
+      call.answer(options, mediaStream: mediaStream);
       _logger.d('Call answered with media stream');
     } catch (e) {
       _logger.e('Error calling answer() with media stream: $e');
@@ -232,29 +229,38 @@ class CallService {
   }
 
   void _handleCallAccept(dynamic params) async {
-    String? sipCallId;
-    if (params is Map && params['extra'] != null && params['extra']['sip_call_id'] != null) {
-      sipCallId = params['extra']['sip_call_id'];
-    } else if (params is Map && params['id'] != null) {
-      sipCallId = params['id'];
+    print('params: $params');
+    // Extract the SIP URI (e.g., "sip:8234@94.130.104.22") from params
+    String? sipUri = params?['extra']?['sip_uri'] ?? params?['sip_uri'];
+    _logger.i('[AutoAnswer] _handleCallAccept called with params: $params');
+    _logger.i('[AutoAnswer] Extracted sipUri: $sipUri');
+    if (sipUri == null) {
+      _logger.e('No SIP URI found in CallKit accept params');
+      return;
     }
-    _logger.i('[CallKit] Accept pressed. Extracted SIP call id: $sipCallId');
-    if (sipCallId != null) {
-      final call = _sipHelper.findCall(sipCallId);
-      if (call != null) {
-        _logger.i('[CallKit] Found SIP call for id: $sipCallId, state: ${call.state}');
-        if (call.state == CallStateEnum.CALL_INITIATION) {
-          _logger.d('Call is in CALL_INITIATION state, proceeding with answer');
-          await answerCallWithMedia(call, _sipHelper);
-        } else {
-          _logger.w('Call is not in CALL_INITIATION state, current state: ${call.state}');
-        }
-      } else {
-        _logger.e('[CallKit] No SIP call found for id: $sipCallId');
-      }
-    } else {
-      _logger.e('[CallKit] No SIP call id found in params for CallKit accept event.');
-    }
+    print('sipUri: $sipUri');
+    // Set shouldAutoAnswer flag in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('shouldAutoAnswer', true);
+    await prefs.setString('expectedSipUri', sipUri);
+    _shouldAutoAnswer = true;
+    _expectedSipUri = sipUri;
+    _logger.i('[AutoAnswer] Set _shouldAutoAnswer: $_shouldAutoAnswer, _expectedSipUri: $_expectedSipUri');
+
+    // Start a timeout to clear auto-answer state
+    _autoAnswerTimer?.cancel();
+    _logger.i('[AutoAnswer] Starting auto-answer timer for 40 seconds');
+    _autoAnswerTimer = Timer(Duration(seconds: 40), () async {
+      _logger.w('[AutoAnswer] Auto-answer timer fired. Current state: _shouldAutoAnswer=$_shouldAutoAnswer, _expectedSipUri=$_expectedSipUri');
+      _shouldAutoAnswer = false;
+      _expectedSipUri = null;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('shouldAutoAnswer', false);
+      await prefs.remove('expectedSipUri');
+      _logger.w('Auto-answer window expired');
+    });
+
+    _logger.i('Set to auto-answer next call from $_expectedSipUri');
   }
 
   void _handleCallDecline(dynamic params) {
@@ -279,11 +285,13 @@ class CallService {
     } else {
       _logger.e('Call not found for id: ${params?['id']}');
     }
+    _resetAutoAnswer();
   }
 
   void _handleCallTimeout(dynamic params) {
     _logger.i('Call timeout: ${params?['id']}');
     // Handle call timeout
+    _resetAutoAnswer();
   }
 
   void _handleCallCallback(dynamic params) {
@@ -315,4 +323,43 @@ class CallService {
     _logger.i('Call toggle audio session: ${params?['id']}');
     // Handle audio session toggle
   }
+
+  /// Call this from your SIPUAHelperListener when a new incoming call arrives
+  Future<void> handleIncomingSipCall(Call call) async {
+    _logger.i('[AutoAnswer] handleIncomingSipCall called');
+    _logger.i('[AutoAnswer] _shouldAutoAnswer: $_shouldAutoAnswer, _expectedSipUri: $_expectedSipUri');
+    _logger.i('[AutoAnswer] call.remote_identity: ${call.remote_identity}');
+    // Check SharedPreferences for shouldAutoAnswer flag
+    final prefs = await SharedPreferences.getInstance();
+    final shouldAutoAnswerPref = prefs.getBool('shouldAutoAnswer') ?? false;
+    final expectedSipUriPref = prefs.getString('expectedSipUri');
+    if ((_shouldAutoAnswer && _expectedSipUri != null) || (shouldAutoAnswerPref && expectedSipUriPref != null)) {
+      final incomingUser = call.remote_identity?.split('@').first;
+      final expectedUser = (_expectedSipUri ?? expectedSipUriPref)?.split('@').first;
+      _logger.i('[AutoAnswer] incomingUser: $incomingUser, expectedUser: $expectedUser');
+      if (incomingUser == expectedUser) {
+        _logger.i('[AutoAnswer] Match found. Auto-answering call for user $expectedUser');
+        await answerCallWithMedia(call);
+        _resetAutoAnswer();
+        await prefs.setBool('shouldAutoAnswer', false);
+        await prefs.remove('expectedSipUri');
+        _logger.i('[AutoAnswer] Auto-answer performed and state reset.');
+        return;
+      } else {
+        _logger.w('[AutoAnswer] Incoming call user $incomingUser does not match expected $expectedUser. Ignoring for auto-answer.');
+      }
+    } else {
+      _logger.i('[AutoAnswer] Auto-answer not enabled or expected SIP URI is null. Skipping auto-answer.');
+    }
+    _logger.i('[AutoAnswer] Exiting handleIncomingSipCall without auto-answer.');
+  }
+
+  /// Call this on call end, timeout, or for safety
+  void _resetAutoAnswer() {
+    _shouldAutoAnswer = false;
+    _expectedSipUri = null;
+    _autoAnswerTimer?.cancel();
+  }
+
+  void resetAutoAnswer() => _resetAutoAnswer();
 } 

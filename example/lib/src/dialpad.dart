@@ -8,13 +8,13 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sip_ua/sip_ua.dart';
+import 'package:dart_sip_ua_example/src/services/call_service.dart';
+import 'services/sip_handler.dart';
 
 import 'widgets/action_button.dart';
 
 class DialPadWidget extends StatefulWidget {
-  final SIPUAHelper _helper;
-
-  const DialPadWidget(this._helper, {Key? key}) : super(key: key);
+  const DialPadWidget({Key? key}) : super(key: key);
 
   @override
   State<DialPadWidget> createState() => _MyDialPadWidget();
@@ -23,7 +23,6 @@ class DialPadWidget extends StatefulWidget {
 class _MyDialPadWidget extends State<DialPadWidget>
     implements SipUaHelperListener {
   String? _dest;
-  SIPUAHelper get helper => widget._helper;
   TextEditingController? _textController;
   late SharedPreferences _preferences;
   late SipUserCubit currentUserCubit;
@@ -31,22 +30,20 @@ class _MyDialPadWidget extends State<DialPadWidget>
   final Logger _logger = Logger();
 
   String? receivedMsg;
+  late CallService callService;
 
   @override
   initState() {
     super.initState();
     receivedMsg = "";
-    _bindEventListeners();
+    SipHandler.instance.addListener(this);
     _loadSettings();
-  }
-
-  void _bindEventListeners() {
-    helper.addSipUaHelperListener(this);
+    callService = CallService(SipHandler.instance.helper);
   }
 
   @override
   void dispose() {
-    helper.removeSipUaHelperListener(this);
+    SipHandler.instance.removeListener(this);
     _textController?.dispose();
     super.dispose();
   }
@@ -62,8 +59,8 @@ class _MyDialPadWidget extends State<DialPadWidget>
 
   void reRegisterWithCurrentUser() async {
     if (currentUserCubit.state == null) return;
-    if (helper.registered) {
-      helper.unregister();
+    if (SipHandler.instance.registrationState?.state == RegistrationStateEnum.REGISTERED) {
+      SipHandler.instance.unregister();
     }
     _logger.i("Re-registering");
     currentUserCubit.register(currentUserCubit.state!);
@@ -83,6 +80,10 @@ class _MyDialPadWidget extends State<DialPadWidget>
 
   @override
   void callStateChanged(Call call, CallState callState) {
+    if (callState.state == CallStateEnum.CALL_INITIATION && call.direction == 'incoming') {
+      // Auto-answer integration
+      // callService.handleIncomingSipCall(call); // If needed, keep this
+    }
     switch (callState.state) {
       case CallStateEnum.CALL_INITIATION:
         Navigator.pushNamed(context, '/callscreen', arguments: call);
@@ -177,7 +178,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
       mediaStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
     }
 
-    helper!.call(dest, voiceOnly: voiceOnly, mediaStream: mediaStream);
+    SipHandler.instance.makeCall(dest, voiceOnly: voiceOnly);
     _preferences.setString('dest', dest);
     return null;
   }
@@ -391,7 +392,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
           SizedBox(height: 8),
           Center(
             child: Text(
-              'Register Status: ${helper!.registerState.state?.name ?? ''}',
+              'Register Status: ${SipHandler.instance.registrationState?.state?.name ?? ''}',
               style: TextStyle(fontSize: 18, color: textColor),
             ),
           ),

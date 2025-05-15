@@ -86,7 +86,10 @@ class FCMService {
             subtitle: 'Calling...',
             callbackText: 'Hang Up',
           ),
-          extra: <String, dynamic>{'userId': callData['user_id'] ?? 'unknown'},
+          extra: <String, dynamic>{
+            'userId': callData['user_id'] ?? 'unknown',
+            if (callData['sip_uri'] != null) 'sip_uri': callData['sip_uri'],
+          },
           headers: <String, dynamic>{
             'apiKey': callData['api_key'] ?? '',
             'platform': 'flutter'

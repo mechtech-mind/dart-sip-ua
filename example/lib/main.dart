@@ -14,6 +14,14 @@ import 'src/callscreen.dart';
 import 'src/about.dart';
 import 'src/theme_provider.dart';
 import 'src/user_state/sip_user_cubit.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'dart:math';
+import 'src/services/sip_handler.dart';
 
 // Background message handler
 @pragma('vm:entry-point')
@@ -21,25 +29,82 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   AppLogger.i('Handling background message: ${message.messageId}');
   try {
     await Firebase.initializeApp();
-    AppLogger.d('Firebase initialized in background handler');
-    final fcmService = FCMService();
-    fcmService.handleIncomingMessage(message);
+    if (message.data['type'] == 'incoming_call') {
+      final callId = message.data['call_id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
+      final params = CallKitParams(
+        id: callId,
+        nameCaller: message.data['caller_name'] ?? 'Unknown',
+        appName: 'SIP Call',
+        avatar: 'https://i.pravatar.cc/100',
+        handle: message.data['caller_number'] ?? 'Unknown',
+        type: 0,
+        textAccept: 'Accept',
+        textDecline: 'Decline',
+        missedCallNotification: NotificationParams(
+          showNotification: true,
+          isShowCallback: true,
+          subtitle: 'Missed call',
+          callbackText: 'Call back',
+        ),
+        callingNotification: NotificationParams(
+          showNotification: true,
+          isShowCallback: true,
+          subtitle: 'Calling...',
+          callbackText: 'Hang Up',
+        ),
+        duration: 30000,
+        extra: <String, dynamic>{
+          'sip_call_id': callId,
+          if (message.data['sip_uri'] != null) 'sip_uri': message.data['sip_uri'],
+        },
+        headers: <String, dynamic>{'platform': 'flutter'},
+        android: AndroidParams(
+          isCustomNotification: true,
+          isShowLogo: false,
+          ringtonePath: 'system_ringtone_default',
+          backgroundColor: '#0955fa',
+          backgroundUrl: 'https://i.pravatar.cc/500',
+          actionColor: '#4CAF50',
+          textColor: '#ffffff',
+          incomingCallNotificationChannelName: "Incoming Call",
+          missedCallNotificationChannelName: "Missed Call",
+          isShowCallID: false,
+        ),
+        ios: IOSParams(
+          iconName: 'CallKitLogo',
+          handleType: 'generic',
+          supportsVideo: true,
+          maximumCallGroups: 2,
+          maximumCallsPerCallGroup: 1,
+          audioSessionMode: 'default',
+          audioSessionActive: true,
+          audioSessionPreferredSampleRate: 44100.0,
+          audioSessionPreferredIOBufferDuration: 0.005,
+          supportsDTMF: true,
+          supportsHolding: true,
+          supportsGrouping: false,
+          supportsUngrouping: false,
+          ringtonePath: 'system_ringtone_default',
+        ),
+      );
+      await FlutterCallkitIncoming.showCallkitIncoming(params);
+      AppLogger.i('CallKit incoming call notification shown (background handler).');
+    }
+    // Do NOT handle Accept/Decline here!
   } catch (e, stackTrace) {
     AppLogger.e('Error in background handler', e, stackTrace);
   }
 }
 
 void main() async {
-  AppLogger.i('Starting application initialization');
+  // Generate a unique instance ID for this app run
+  final instanceId = Random().nextInt(1000000);
+  AppLogger.i('Starting application initialization [InstanceID: $instanceId]');
   
   try {
     // Initialize Flutter bindings first
     AppLogger.d('Initializing Flutter bindings');
     WidgetsFlutterBinding.ensureInitialized();
-    
-    // Create SIPUAHelper instance
-    AppLogger.d('Creating SIPUAHelper instance');
-    final sipHelper = SIPUAHelper();
     
     // Set logger to show all levels
     AppLogger.d('Configuring logging levels');
@@ -56,12 +121,11 @@ void main() async {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeProvider()),
-          Provider<SIPUAHelper>.value(value: sipHelper),
           Provider<SipUserCubit>(
-            create: (context) => SipUserCubit(sipHelper: sipHelper),
+            create: (context) => SipUserCubit(sipHelper: SipHandler.instance.helper),
           ),
         ],
-        child: MyApp(sipHelper: sipHelper),
+        child: MyApp(),
       ),
     );
   } catch (e, stackTrace) {
@@ -71,9 +135,7 @@ void main() async {
 }
 
 class MyApp extends StatefulWidget {
-  final SIPUAHelper sipHelper;
-  
-  const MyApp({Key? key, required this.sipHelper}) : super(key: key);
+  const MyApp({Key? key}) : super(key: key);
 
   @override
   _MyAppState createState() => _MyAppState();
@@ -95,10 +157,10 @@ class _MyAppState extends State<MyApp> {
     try {
       AppLogger.d('Setting up routes');
       routes = {
-        '/': ([SIPUAHelper? helper, Object? arguments]) => DialPadWidget(widget.sipHelper),
-        '/register': ([SIPUAHelper? helper, Object? arguments]) => RegisterWidget(widget.sipHelper),
-        '/callscreen': ([SIPUAHelper? helper, Object? arguments]) => CallScreenWidget(widget.sipHelper, arguments as Call?),
-        '/about': ([SIPUAHelper? helper, Object? arguments]) => AboutWidget(),
+        '/': ([Object? arguments]) => DialPadWidget(),
+        '/register': ([Object? arguments]) => RegisterWidget(),
+        '/callscreen': ([Object? arguments]) => CallScreenWidget(),
+        '/about': ([Object? arguments]) => AboutWidget(),
       };
 
       if (!kIsWeb) {
@@ -113,6 +175,201 @@ class _MyAppState extends State<MyApp> {
 
         AppLogger.d('Setting up background message handler');
         FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+        // Listen for incoming_call FCM messages and show CallKit notification
+        FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
+          AppLogger.d('onMessage: ${message.data}');
+          if (message.data['type'] == 'incoming_call') {
+            final callId = message.data['call_id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final params = CallKitParams(
+              id: callId,
+              nameCaller: message.data['caller_name'] ?? 'Unknown',
+              appName: 'SIP Call',
+              avatar: 'https://i.pravatar.cc/100',
+              handle: message.data['caller_number'] ?? 'Unknown',
+              type: 0,
+              textAccept: 'Accept',
+              textDecline: 'Decline',
+              missedCallNotification: NotificationParams(
+                showNotification: true,
+                isShowCallback: true,
+                subtitle: 'Missed call',
+                callbackText: 'Call back',
+              ),
+              callingNotification: NotificationParams(
+                showNotification: true,
+                isShowCallback: true,
+                subtitle: 'Calling...',
+                callbackText: 'Hang Up',
+              ),
+              duration: 30000,
+              extra: <String, dynamic>{
+                'sip_call_id': callId,
+                if (message.data['sip_uri'] != null) 'sip_uri': message.data['sip_uri'],
+              },
+              headers: <String, dynamic>{'platform': 'flutter'},
+              android: AndroidParams(
+                isCustomNotification: true,
+                isShowLogo: false,
+                ringtonePath: 'system_ringtone_default',
+                backgroundColor: '#0955fa',
+                backgroundUrl: 'https://i.pravatar.cc/500',
+                actionColor: '#4CAF50',
+                textColor: '#ffffff',
+                incomingCallNotificationChannelName: "Incoming Call",
+                missedCallNotificationChannelName: "Missed Call",
+                isShowCallID: false,
+              ),
+              ios: IOSParams(
+                iconName: 'CallKitLogo',
+                handleType: 'generic',
+                supportsVideo: true,
+                maximumCallGroups: 2,
+                maximumCallsPerCallGroup: 1,
+                audioSessionMode: 'default',
+                audioSessionActive: true,
+                audioSessionPreferredSampleRate: 44100.0,
+                audioSessionPreferredIOBufferDuration: 0.005,
+                supportsDTMF: true,
+                supportsHolding: true,
+                supportsGrouping: false,
+                supportsUngrouping: false,
+                ringtonePath: 'system_ringtone_default',
+              ),
+            );
+            await FlutterCallkitIncoming.showCallkitIncoming(params);
+            AppLogger.i('CallKit incoming call notification shown.');
+          }
+        });
+
+        FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
+          AppLogger.d('onMessageOpenedApp: ${message.data}');
+          if (message.data['type'] == 'incoming_call') {
+            final callId = message.data['call_id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final params = CallKitParams(
+              id: callId,
+              nameCaller: message.data['caller_name'] ?? 'Unknown',
+              appName: 'SIP Call',
+              avatar: 'https://i.pravatar.cc/100',
+              handle: message.data['caller_number'] ?? 'Unknown',
+              type: 0,
+              textAccept: 'Accept',
+              textDecline: 'Decline',
+              missedCallNotification: NotificationParams(
+                showNotification: true,
+                isShowCallback: true,
+                subtitle: 'Missed call',
+                callbackText: 'Call back',
+              ),
+              callingNotification: NotificationParams(
+                showNotification: true,
+                isShowCallback: true,
+                subtitle: 'Calling...',
+                callbackText: 'Hang Up',
+              ),
+              duration: 30000,
+              extra: <String, dynamic>{
+                'sip_call_id': callId,
+                if (message.data['sip_uri'] != null) 'sip_uri': message.data['sip_uri'],
+              },
+              headers: <String, dynamic>{'platform': 'flutter'},
+              android: AndroidParams(
+                isCustomNotification: true,
+                isShowLogo: false,
+                ringtonePath: 'system_ringtone_default',
+                backgroundColor: '#0955fa',
+                backgroundUrl: 'https://i.pravatar.cc/500',
+                actionColor: '#4CAF50',
+                textColor: '#ffffff',
+                incomingCallNotificationChannelName: "Incoming Call",
+                missedCallNotificationChannelName: "Missed Call",
+                isShowCallID: false,
+              ),
+              ios: IOSParams(
+                iconName: 'CallKitLogo',
+                handleType: 'generic',
+                supportsVideo: true,
+                maximumCallGroups: 2,
+                maximumCallsPerCallGroup: 1,
+                audioSessionMode: 'default',
+                audioSessionActive: true,
+                audioSessionPreferredSampleRate: 44100.0,
+                audioSessionPreferredIOBufferDuration: 0.005,
+                supportsDTMF: true,
+                supportsHolding: true,
+                supportsGrouping: false,
+                supportsUngrouping: false,
+                ringtonePath: 'system_ringtone_default',
+              ),
+            );
+            await FlutterCallkitIncoming.showCallkitIncoming(params);
+            AppLogger.i('CallKit incoming call notification shown (opened app).');
+          }
+        });
+
+        // Optionally handle getInitialMessage for terminated state
+        final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+        if (initialMessage != null && initialMessage.data['type'] == 'incoming_call') {
+          final callId = initialMessage.data['call_id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
+          final params = CallKitParams(
+            id: callId,
+            nameCaller: initialMessage.data['caller_name'] ?? 'Unknown',
+            appName: 'SIP Call',
+            avatar: 'https://i.pravatar.cc/100',
+            handle: initialMessage.data['caller_number'] ?? 'Unknown',
+            type: 0,
+            textAccept: 'Accept',
+            textDecline: 'Decline',
+            missedCallNotification: NotificationParams(
+              showNotification: true,
+              isShowCallback: true,
+              subtitle: 'Missed call',
+              callbackText: 'Call back',
+            ),
+            callingNotification: NotificationParams(
+              showNotification: true,
+              isShowCallback: true,
+              subtitle: 'Calling...',
+              callbackText: 'Hang Up',
+            ),
+            duration: 30000,
+            extra: <String, dynamic>{
+              'sip_call_id': callId,
+              if (initialMessage.data['sip_uri'] != null) 'sip_uri': initialMessage.data['sip_uri'],
+            },
+            headers: <String, dynamic>{'platform': 'flutter'},
+            android: AndroidParams(
+              isCustomNotification: true,
+              isShowLogo: false,
+              ringtonePath: 'system_ringtone_default',
+              backgroundColor: '#0955fa',
+              backgroundUrl: 'https://i.pravatar.cc/500',
+              actionColor: '#4CAF50',
+              textColor: '#ffffff',
+              incomingCallNotificationChannelName: "Incoming Call",
+              missedCallNotificationChannelName: "Missed Call",
+              isShowCallID: false,
+            ),
+            ios: IOSParams(
+              iconName: 'CallKitLogo',
+              handleType: 'generic',
+              supportsVideo: true,
+              maximumCallGroups: 2,
+              maximumCallsPerCallGroup: 1,
+              audioSessionMode: 'default',
+              audioSessionActive: true,
+              audioSessionPreferredSampleRate: 44100.0,
+              audioSessionPreferredIOBufferDuration: 0.005,
+              supportsDTMF: true,
+              supportsHolding: true,
+              supportsGrouping: false,
+              supportsUngrouping: false,
+              ringtonePath: 'system_ringtone_default',
+            ),
+          );
+          await FlutterCallkitIncoming.showCallkitIncoming(params);
+          AppLogger.i('CallKit incoming call notification shown (initial message).');
+        }
       } else {
         AppLogger.i('Running on web platform, skipping Firebase initialization');
       }
@@ -141,12 +398,12 @@ class _MyAppState extends State<MyApp> {
       if (settings.arguments != null) {
         AppLogger.d('Creating route with arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder(widget.sipHelper, settings.arguments));
+            builder: (context) => pageContentBuilder(settings.arguments));
         return route;
       } else {
         AppLogger.d('Creating route without arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder(widget.sipHelper));
+            builder: (context) => pageContentBuilder());
         return route;
       }
     }
@@ -177,7 +434,7 @@ class _MyAppState extends State<MyApp> {
                   ),
                 ),
               )
-            : DialPadWidget(widget.sipHelper))
+            : DialPadWidget())
         : Scaffold(
             body: Center(
               child: Column(
@@ -195,4 +452,4 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-typedef PageContentBuilder = Widget Function([SIPUAHelper? helper, Object? arguments]);
+typedef PageContentBuilder = Widget Function([Object? arguments]);
