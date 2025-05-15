@@ -13,10 +13,11 @@ import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:uuid/uuid.dart';
 import 'package:dart_sip_ua_example/src/services/call_service.dart';
-import 'services/sip_handler.dart';
 
 class RegisterWidget extends StatefulWidget {
-  const RegisterWidget({Key? key}) : super(key: key);
+  final SIPUAHelper? _helper;
+
+  RegisterWidget(this._helper, {Key? key}) : super(key: key);
 
   @override
   State<RegisterWidget> createState() => _MyRegisterWidget();
@@ -51,6 +52,8 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   TransportType _selectedTransport = TransportType.TCP;
 
+  SIPUAHelper? get helper => widget._helper;
+
   late SipUserCubit currentUser;
 
   final _uuid = Uuid();
@@ -62,13 +65,13 @@ class _MyRegisterWidget extends State<RegisterWidget>
   void initState() {
     super.initState();
     _currentUuid = _uuid.v4();
-    _registerState = SipHandler.instance.registrationState ?? RegistrationState();
-    SipHandler.instance.addListener(this);
+    _registerState = helper!.registerState;
+    helper!.addSipUaHelperListener(this);
     _loadSettings();
     if (kIsWeb) {
       _selectedTransport = TransportType.WS;
     }
-    callService = CallService(SipHandler.instance.helper);
+    callService = CallService(helper!);
   }
 
   @override
@@ -78,14 +81,13 @@ class _MyRegisterWidget extends State<RegisterWidget>
     _sipUriController.dispose();
     _displayNameController.dispose();
     _authorizationUserController.dispose();
-    SipHandler.instance.removeListener(this);
     super.dispose();
   }
 
   @override
   void deactivate() {
     super.deactivate();
-    SipHandler.instance.removeListener(this);
+    helper!.removeSipUaHelperListener(this);
     _saveSettings();
   }
 
@@ -170,22 +172,16 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
     try {
       _logger.i('Attempting to register with SIP server...');
-      UaSettings settings = UaSettings();
-      settings.port = _portController.text;
-      settings.webSocketSettings.extraHeaders = _wsExtraHeaders;
-      settings.webSocketSettings.allowBadCertificate = true;
-      settings.tcpSocketSettings.allowBadCertificate = true;
-      settings.transportType = _selectedTransport;
-      settings.uri = _sipUriController.text;
-      settings.webSocketUrl = _wsUriController.text;
-      settings.host = _sipUriController.text.split('@')[1];
-      settings.authorizationUser = _authorizationUserController.text;
-      settings.password = _passwordController.text;
-      settings.displayName = _displayNameController.text;
-      settings.userAgent = 'Dart SIP Client v1.0.0';
-      settings.dtmfMode = DtmfMode.RFC2833;
-      settings.contact_uri = 'sip:${_sipUriController.text}';
-      SipHandler.instance.register(settings);
+      currentUser.register(SipUser(
+        wsUrl: _wsUriController.text,
+        selectedTransport: _selectedTransport,
+        wsExtraHeaders: _wsExtraHeaders,
+        sipUri: _sipUriController.text,
+        port: _portController.text,
+        displayName: _displayNameController.text,
+        password: _passwordController.text,
+        authUser: _authorizationUserController.text,
+      ));
       _logger.i('Registration request sent successfully');
     } catch (e) {
       _logger.e('Error during registration: $e');

@@ -21,7 +21,6 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'dart:math';
-import 'src/services/sip_handler.dart';
 
 // Background message handler
 @pragma('vm:entry-point')
@@ -106,6 +105,10 @@ void main() async {
     AppLogger.d('Initializing Flutter bindings');
     WidgetsFlutterBinding.ensureInitialized();
     
+    // Create SIPUAHelper instance
+    AppLogger.d('Creating SIPUAHelper instance');
+    final sipHelper = SIPUAHelper();
+    
     // Set logger to show all levels
     AppLogger.d('Configuring logging levels');
     Logger.level = Level.debug;
@@ -121,11 +124,12 @@ void main() async {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeProvider()),
+          Provider<SIPUAHelper>.value(value: sipHelper),
           Provider<SipUserCubit>(
-            create: (context) => SipUserCubit(sipHelper: SipHandler.instance.helper),
+            create: (context) => SipUserCubit(sipHelper: sipHelper),
           ),
         ],
-        child: MyApp(),
+        child: MyApp(sipHelper: sipHelper),
       ),
     );
   } catch (e, stackTrace) {
@@ -135,7 +139,9 @@ void main() async {
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({Key? key}) : super(key: key);
+  final SIPUAHelper sipHelper;
+  
+  const MyApp({Key? key, required this.sipHelper}) : super(key: key);
 
   @override
   _MyAppState createState() => _MyAppState();
@@ -157,10 +163,10 @@ class _MyAppState extends State<MyApp> {
     try {
       AppLogger.d('Setting up routes');
       routes = {
-        '/': ([Object? arguments]) => DialPadWidget(),
-        '/register': ([Object? arguments]) => RegisterWidget(),
-        '/callscreen': ([Object? arguments]) => CallScreenWidget(),
-        '/about': ([Object? arguments]) => AboutWidget(),
+        '/': ([SIPUAHelper? helper, Object? arguments]) => DialPadWidget(widget.sipHelper),
+        '/register': ([SIPUAHelper? helper, Object? arguments]) => RegisterWidget(widget.sipHelper),
+        '/callscreen': ([SIPUAHelper? helper, Object? arguments]) => CallScreenWidget(widget.sipHelper, arguments as Call?),
+        '/about': ([SIPUAHelper? helper, Object? arguments]) => AboutWidget(),
       };
 
       if (!kIsWeb) {
@@ -398,12 +404,12 @@ class _MyAppState extends State<MyApp> {
       if (settings.arguments != null) {
         AppLogger.d('Creating route with arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder(settings.arguments));
+            builder: (context) => pageContentBuilder(widget.sipHelper, settings.arguments));
         return route;
       } else {
         AppLogger.d('Creating route without arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder());
+            builder: (context) => pageContentBuilder(widget.sipHelper));
         return route;
       }
     }
@@ -434,7 +440,7 @@ class _MyAppState extends State<MyApp> {
                   ),
                 ),
               )
-            : DialPadWidget())
+            : DialPadWidget(widget.sipHelper))
         : Scaffold(
             body: Center(
               child: Column(
@@ -452,4 +458,4 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-typedef PageContentBuilder = Widget Function([Object? arguments]);
+typedef PageContentBuilder = Widget Function([SIPUAHelper? helper, Object? arguments]);

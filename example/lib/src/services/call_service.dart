@@ -9,9 +9,8 @@ import 'package:sip_ua/sip_ua.dart';
 import 'package:uuid/uuid.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
-import 'package:dart_sip_ua_example/src/services/sip_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CallService {
   final _logger = Logger(
@@ -33,7 +32,7 @@ class CallService {
   String? _expectedSipUri;
   Timer? _autoAnswerTimer;
 
-  CallService([SIPUAHelper? helper]) : _sipHelper = SipHandler.instance.helper {
+  CallService(this._sipHelper) {
     _setupCallKitListeners();
     _setupFCMListeners();
   }
@@ -184,7 +183,7 @@ class CallService {
     }
   }
 
-  Future<void> answerCallWithMedia(Call call) async {
+  Future<void> answerCallWithMedia(Call call, SIPUAHelper helper) async {
     final remoteHasVideo = call.remote_has_video;
     final mediaConstraints = <String, dynamic>{
       'audio': true,
@@ -220,8 +219,7 @@ class CallService {
     }
 
     try {
-      final options = SipHandler.instance.helper.buildCallOptions(!remoteHasVideo);
-      call.answer(options, mediaStream: mediaStream);
+      call.answer(helper.buildCallOptions(!remoteHasVideo), mediaStream: mediaStream);
       _logger.d('Call answered with media stream');
     } catch (e) {
       _logger.e('Error calling answer() with media stream: $e');
@@ -339,7 +337,7 @@ class CallService {
       _logger.i('[AutoAnswer] incomingUser: $incomingUser, expectedUser: $expectedUser');
       if (incomingUser == expectedUser) {
         _logger.i('[AutoAnswer] Match found. Auto-answering call for user $expectedUser');
-        await answerCallWithMedia(call);
+        await answerCallWithMedia(call, _sipHelper);
         _resetAutoAnswer();
         await prefs.setBool('shouldAutoAnswer', false);
         await prefs.remove('expectedSipUri');
