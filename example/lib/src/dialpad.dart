@@ -5,29 +5,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:dart_sip_ua_example/src/services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../main.dart';
 
 import 'widgets/action_button.dart';
 
-class DialPadWidget extends StatefulWidget {
-  final SIPUAHelper _helper;
-
-  const DialPadWidget(this._helper, {Key? key}) : super(key: key);
+class DialPadWidget extends ConsumerStatefulWidget {
+  const DialPadWidget({Key? key}) : super(key: key);
 
   @override
-  State<DialPadWidget> createState() => _MyDialPadWidget();
+  ConsumerState<DialPadWidget> createState() => _MyDialPadWidget();
 }
 
-class _MyDialPadWidget extends State<DialPadWidget>
+class _MyDialPadWidget extends ConsumerState<DialPadWidget>
     implements SipUaHelperListener {
   String? _dest;
-  SIPUAHelper get helper => widget._helper;
+  late SipUserCubit currentUserCubit;
+  late SIPUAHelper helper;
   TextEditingController? _textController;
   late SharedPreferences _preferences;
-  late SipUserCubit currentUserCubit;
 
   final Logger _logger = Logger();
 
@@ -35,12 +34,18 @@ class _MyDialPadWidget extends State<DialPadWidget>
   late CallService callService;
 
   @override
-  initState() {
+  void initState() {
     super.initState();
     receivedMsg = "";
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    helper = ref.read(sipUAHelperProvider);
     _bindEventListeners();
     _loadSettings();
-    callService = CallService(helper!);
+    callService = CallService(helper);
   }
 
   void _bindEventListeners() {
@@ -184,7 +189,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
       mediaStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
     }
 
-    helper!.call(dest, voiceOnly: voiceOnly, mediaStream: mediaStream);
+    helper.call(dest, voiceOnly: voiceOnly, mediaStream: mediaStream);
     _preferences.setString('dest', dest);
     return null;
   }
@@ -316,7 +321,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
     Color? textColor = Theme.of(context).textTheme.bodyMedium?.color;
     Color? iconColor = Theme.of(context).iconTheme.color;
     bool isDarkTheme = Theme.of(context).brightness == Brightness.dark;
-    currentUserCubit = context.watch<SipUserCubit>();
+    currentUserCubit = ref.watch(sipUserCubitProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -332,17 +337,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
                     Navigator.pushNamed(context, '/about');
                     break;
                   case 'theme':
-                    final themeProvider = Provider.of<ThemeProvider>(context,
-                        listen:
-                            false); // get the provider, listen false is necessary cause is in a function
-
-                    setState(() {
-                      isDarkTheme = !isDarkTheme;
-                    }); // change the variable
-
-                    isDarkTheme // call the functions
-                        ? themeProvider.setDarkmode()
-                        : themeProvider.setLightMode();
+                    ref.read(themeProvider).setDarkmode();
                     break;
                   default:
                     break;
@@ -398,7 +393,7 @@ class _MyDialPadWidget extends State<DialPadWidget>
           SizedBox(height: 8),
           Center(
             child: Text(
-              'Register Status: ${helper!.registerState.state?.name ?? ''}',
+              'Register Status: ${helper.registerState.state?.name ?? ''}',
               style: TextStyle(fontSize: 18, color: textColor),
             ),
           ),

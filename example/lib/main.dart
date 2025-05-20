@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:provider/provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:sip_ua/sip_ua.dart';
 import 'package:logger/logger.dart';
@@ -21,6 +20,7 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'dart:math';
+import 'package:flutter_riverpod/flutter_riverpod.dart' as riverpod;
 
 // Background message handler
 @pragma('vm:entry-point')
@@ -95,6 +95,13 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+// Riverpod providers
+final themeProvider = riverpod.ChangeNotifierProvider<ThemeProvider>((ref) => ThemeProvider());
+final sipUAHelperProvider = riverpod.Provider<SIPUAHelper>((ref) => SIPUAHelper());
+final sipUserCubitProvider = riverpod.Provider<SipUserCubit>(
+  (ref) => SipUserCubit(sipHelper: ref.watch(sipUAHelperProvider)),
+);
+
 void main() async {
   // Generate a unique instance ID for this app run
   final instanceId = Random().nextInt(1000000);
@@ -104,10 +111,6 @@ void main() async {
     // Initialize Flutter bindings first
     AppLogger.d('Initializing Flutter bindings');
     WidgetsFlutterBinding.ensureInitialized();
-    
-    // Create SIPUAHelper instance
-    AppLogger.d('Creating SIPUAHelper instance');
-    final sipHelper = SIPUAHelper();
     
     // Set logger to show all levels
     AppLogger.d('Configuring logging levels');
@@ -121,15 +124,8 @@ void main() async {
     
     AppLogger.i('Running application');
     runApp(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(create: (_) => ThemeProvider()),
-          Provider<SIPUAHelper>.value(value: sipHelper),
-          Provider<SipUserCubit>(
-            create: (context) => SipUserCubit(sipHelper: sipHelper),
-          ),
-        ],
-        child: MyApp(sipHelper: sipHelper),
+      riverpod.ProviderScope(
+        child: MyApp(),
       ),
     );
   } catch (e, stackTrace) {
@@ -138,16 +134,14 @@ void main() async {
   }
 }
 
-class MyApp extends StatefulWidget {
-  final SIPUAHelper sipHelper;
-  
-  const MyApp({Key? key, required this.sipHelper}) : super(key: key);
+class MyApp extends riverpod.ConsumerStatefulWidget {
+  const MyApp({Key? key}) : super(key: key);
 
   @override
   _MyAppState createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends riverpod.ConsumerState<MyApp> {
   late Map<String, PageContentBuilder> routes;
   bool _isInitialized = false;
   String? _initError;
@@ -162,11 +156,12 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initializeApp() async {
     try {
       AppLogger.d('Setting up routes');
+      final sipHelper = ref.read(sipUAHelperProvider);
       routes = {
-        '/': ([SIPUAHelper? helper, Object? arguments]) => DialPadWidget(widget.sipHelper),
-        '/register': ([SIPUAHelper? helper, Object? arguments]) => RegisterWidget(widget.sipHelper),
-        '/callscreen': ([SIPUAHelper? helper, Object? arguments]) => CallScreenWidget(widget.sipHelper, arguments as Call?),
-        '/about': ([SIPUAHelper? helper, Object? arguments]) => AboutWidget(),
+        '/': ([Object? arguments]) => const DialPadWidget(),
+        '/register': ([Object? arguments]) => const RegisterWidget(),
+        '/callscreen': ([Object? arguments]) => CallScreenWidget(arguments as Call?),
+        '/about': ([Object? arguments]) => AboutWidget(),
       };
 
       if (!kIsWeb) {
@@ -404,12 +399,12 @@ class _MyAppState extends State<MyApp> {
       if (settings.arguments != null) {
         AppLogger.d('Creating route with arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder(widget.sipHelper, settings.arguments));
+            builder: (context) => pageContentBuilder(settings.arguments));
         return route;
       } else {
         AppLogger.d('Creating route without arguments');
         final Route route = MaterialPageRoute<Widget>(
-            builder: (context) => pageContentBuilder(widget.sipHelper));
+            builder: (context) => pageContentBuilder());
         return route;
       }
     }
@@ -420,9 +415,10 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     AppLogger.d('Building MyApp widget');
+    final theme = ref.watch(themeProvider);
     return MaterialApp(
       title: 'Dart SIP UA Example',
-      theme: Provider.of<ThemeProvider>(context).currentTheme,
+      theme: theme.currentTheme,
       home: _isInitialized 
         ? (_initError != null
             ? Scaffold(
@@ -440,7 +436,7 @@ class _MyAppState extends State<MyApp> {
                   ),
                 ),
               )
-            : DialPadWidget(widget.sipHelper))
+            : const DialPadWidget())
         : Scaffold(
             body: Center(
               child: Column(
@@ -458,4 +454,4 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-typedef PageContentBuilder = Widget Function([SIPUAHelper? helper, Object? arguments]);
+typedef PageContentBuilder = Widget Function([Object? arguments]);

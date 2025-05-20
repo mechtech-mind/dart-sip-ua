@@ -1,7 +1,7 @@
 import 'package:dart_sip_ua_example/src/user_state/sip_user.dart';
 import 'package:dart_sip_ua_example/src/user_state/sip_user_cubit.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -13,17 +13,16 @@ import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:uuid/uuid.dart';
 import 'package:dart_sip_ua_example/src/services/call_service.dart';
+import '../../main.dart';
 
-class RegisterWidget extends StatefulWidget {
-  final SIPUAHelper? _helper;
-
-  RegisterWidget(this._helper, {Key? key}) : super(key: key);
+class RegisterWidget extends ConsumerStatefulWidget {
+  const RegisterWidget({Key? key}) : super(key: key);
 
   @override
-  State<RegisterWidget> createState() => _MyRegisterWidget();
+  ConsumerState<RegisterWidget> createState() => _MyRegisterWidget();
 }
 
-class _MyRegisterWidget extends State<RegisterWidget>
+class _MyRegisterWidget extends ConsumerState<RegisterWidget>
     implements SipUaHelperListener {
   final _logger = Logger(
     printer: PrettyPrinter(
@@ -52,9 +51,8 @@ class _MyRegisterWidget extends State<RegisterWidget>
 
   TransportType _selectedTransport = TransportType.TCP;
 
-  SIPUAHelper? get helper => widget._helper;
-
   late SipUserCubit currentUser;
+  late SIPUAHelper helper;
 
   final _uuid = Uuid();
   String? _currentUuid;
@@ -65,17 +63,24 @@ class _MyRegisterWidget extends State<RegisterWidget>
   void initState() {
     super.initState();
     _currentUuid = _uuid.v4();
-    _registerState = helper!.registerState;
-    helper!.addSipUaHelperListener(this);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    helper = ref.read(sipUAHelperProvider);
+    _registerState = helper.registerState;
+    helper.addSipUaHelperListener(this);
     _loadSettings();
     if (kIsWeb) {
       _selectedTransport = TransportType.WS;
     }
-    callService = CallService(helper!);
+    callService = CallService(helper);
   }
 
   @override
   void dispose() {
+    helper.removeSipUaHelperListener(this);
     _passwordController.dispose();
     _wsUriController.dispose();
     _sipUriController.dispose();
@@ -87,7 +92,7 @@ class _MyRegisterWidget extends State<RegisterWidget>
   @override
   void deactivate() {
     super.deactivate();
-    helper!.removeSipUaHelperListener(this);
+    helper.removeSipUaHelperListener(this);
     _saveSettings();
   }
 
@@ -304,7 +309,7 @@ class _MyRegisterWidget extends State<RegisterWidget>
     Color? textColor = Theme.of(context).textTheme.bodyMedium?.color;
     Color? textFieldFill =
         Theme.of(context).buttonTheme.colorScheme?.surfaceContainerLowest;
-    currentUser = context.watch<SipUserCubit>();
+    currentUser = ref.watch(sipUserCubitProvider);
 
     OutlineInputBorder border = OutlineInputBorder(
       borderSide: BorderSide.none,

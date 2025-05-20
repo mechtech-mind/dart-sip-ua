@@ -6,23 +6,23 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:dart_sip_ua_example/src/utils/logger.dart';
 import 'services/call_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../main.dart';
 
 import 'widgets/action_button.dart';
 
 /// Temporary fix: Direction enum definition
 
-class CallScreenWidget extends StatefulWidget {
-  final SIPUAHelper? _helper;
+class CallScreenWidget extends ConsumerStatefulWidget {
   final Call? _call;
 
-  
-  CallScreenWidget(this._helper, this._call, {Key? key}) : super(key: key);
+  const CallScreenWidget(this._call, {Key? key}) : super(key: key);
 
   @override
-  State<CallScreenWidget> createState() => _MyCallScreenWidget();
+  ConsumerState<CallScreenWidget> createState() => _MyCallScreenWidget();
 }
 
-class _MyCallScreenWidget extends State<CallScreenWidget>
+class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
     implements SipUaHelperListener {
   RTCVideoRenderer? _localRenderer = RTCVideoRenderer();
   RTCVideoRenderer? _remoteRenderer = RTCVideoRenderer();
@@ -46,29 +46,34 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
   late String _transferTarget;
   late Timer _timer;
   late CallService? _callService;
+  late SIPUAHelper helper;
 
-  SIPUAHelper? get helper => widget._helper;
+  Call? get call => widget._call;
 
   bool get voiceOnly => call!.voiceOnly && !call!.remote_has_video;
 
   String? get remoteIdentity => call!.remote_identity;
 
-  Call? get call => widget._call;
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
-  initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    helper = ref.read(sipUAHelperProvider);
     _initRenderers();
-    helper!.addSipUaHelperListener(this);
+    helper.addSipUaHelperListener(this);
     _startTimer();
     AppLogger.d('initState: call.direction = \\${call!.direction}');
-    _callService = CallService(helper!);
+    _callService = CallService(helper);
   }
 
   @override
   deactivate() {
     super.deactivate();
-    helper!.removeSipUaHelperListener(this);
+    helper.removeSipUaHelperListener(this);
     _disposeRenderers();
   }
 
@@ -328,12 +333,12 @@ class _MyCallScreenWidget extends State<CallScreenWidget>
       setState(() {
         call!.voiceOnly = false;
       });
-      helper!.renegotiate(
+      helper.renegotiate(
           call: call!,
           voiceOnly: false,
           done: (IncomingMessage? incomingMessage) {});
     } else {
-      helper!.renegotiate(
+      helper.renegotiate(
           call: call!,
           voiceOnly: true,
           done: (IncomingMessage? incomingMessage) {});
