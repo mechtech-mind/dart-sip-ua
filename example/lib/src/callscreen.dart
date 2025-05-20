@@ -6,6 +6,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:sip_ua/sip_ua.dart';
 import 'package:dart_sip_ua_example/src/utils/logger.dart';
 import 'services/call_service.dart';
+import 'services/service_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
 
@@ -45,7 +46,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
 
   late String _transferTarget;
   late Timer _timer;
-  late CallService? _callService;
+  late CallService _callService;
   late SIPUAHelper helper;
 
   Call? get call => widget._call;
@@ -66,7 +67,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
     _initRenderers();
     helper.addSipUaHelperListener(this);
     _startTimer();
-    AppLogger.d('initState: call.direction = \\${call!.direction}');
+    AppLogger.d('initState: call.direction = ${call!.direction}');
     _callService = CallService(helper);
   }
 
@@ -112,10 +113,10 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
 
   @override
   void callStateChanged(Call call, CallState callState) {
-    AppLogger.d('Call state changed: \\${callState.state}');
-    AppLogger.d('Previous state: \\$_state');
-    AppLogger.d('Call direction (call.direction): \\${call.direction}');
-    AppLogger.d('Call originator: \\${callState.originator}');
+    AppLogger.d('Call state changed: ${callState.state}');
+    AppLogger.d('Previous state: $_state');
+    AppLogger.d('Call direction (call.direction): ${call.direction}');
+    AppLogger.d('Call originator: ${callState.originator}');
     
     if (callState.state == CallStateEnum.HOLD ||
         callState.state == CallStateEnum.UNHOLD) {
@@ -242,7 +243,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   void _handleAccept() async {
     AppLogger.d('Starting call acceptance process');
     if (_callService != null && call != null && helper != null) {
-      await _callService!.answerCallWithMedia(call!, helper!);
+      await _callService.answerCallWithMedia(call!, helper);
     }
   }
 

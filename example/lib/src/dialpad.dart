@@ -10,6 +10,7 @@ import 'package:sip_ua/sip_ua.dart';
 import 'package:dart_sip_ua_example/src/services/call_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
+import 'services/service_providers.dart';
 
 import 'widgets/action_button.dart';
 

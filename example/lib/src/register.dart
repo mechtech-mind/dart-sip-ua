@@ -1,3 +1,4 @@
+import 'package:dart_sip_ua_example/src/services/service_providers.dart';
 import 'package:dart_sip_ua_example/src/user_state/sip_user.dart';
 import 'package:dart_sip_ua_example/src/user_state/sip_user_cubit.dart';
 import 'package:flutter/material.dart';
@@ -53,6 +54,7 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
 
   late SipUserCubit currentUser;
   late SIPUAHelper helper;
+  late CombinedServices services;
 
   final _uuid = Uuid();
   String? _currentUuid;
@@ -68,14 +70,16 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    helper = ref.read(sipUAHelperProvider);
-    _registerState = helper.registerState;
-    helper.addSipUaHelperListener(this);
-    _loadSettings();
-    if (kIsWeb) {
-      _selectedTransport = TransportType.WS;
-    }
-    callService = CallService(helper);
+    final servicesAsync = ref.watch(combinedServicesProvider);
+    servicesAsync.whenData((services) {
+      helper = services.sipHelper;
+      _registerState = helper.registerState;
+      helper.addSipUaHelperListener(this);
+      _loadSettings();
+      if (kIsWeb) {
+        _selectedTransport = TransportType.WS;
+      }
+    });
   }
 
   @override
@@ -306,6 +310,24 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
 
   @override
   Widget build(BuildContext context) {
+    final servicesAsync = ref.watch(combinedServicesProvider);
+    
+    return servicesAsync.when(
+      data: (services) => _buildContent(),
+      loading: () => Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      ),
+      error: (error, stack) => Scaffold(
+        body: Center(
+          child: Text('Error: $error'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent() {
     Color? textColor = Theme.of(context).textTheme.bodyMedium?.color;
     Color? textFieldFill =
         Theme.of(context).buttonTheme.colorScheme?.surfaceContainerLowest;
