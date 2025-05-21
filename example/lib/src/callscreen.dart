@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -9,15 +10,37 @@ import 'services/call_service.dart';
 import 'services/service_providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
+import 'package:audio_session/audio_session.dart';
 
 import 'widgets/action_button.dart';
 
 /// Temporary fix: Direction enum definition
 
-class CallScreenWidget extends ConsumerStatefulWidget {
-  final Call? _call;
+// Add AudioMode enum
+enum AudioMode {
+  normal,
+  ringtone,
+  inCall,
+  communication,
+  speakerphone
+}
 
-  const CallScreenWidget(this._call, {Key? key}) : super(key: key);
+extension AudioHelper on Helper {
+  static Future<void> setAudioMode(AudioMode mode) async {
+    final Map<String, dynamic> mediaConstraints = {
+      'audio': true,
+      'audioMode': mode.toString().split('.').last,
+    };
+    
+    await navigator.mediaDevices.getUserMedia(mediaConstraints);
+  }
+}
+
+class CallScreenWidget extends ConsumerStatefulWidget {
+  static const routeName = '/callscreen';
+  final Call call;
+
+  const CallScreenWidget(this.call, {Key? key}) : super(key: key);
 
   @override
   ConsumerState<CallScreenWidget> createState() => _MyCallScreenWidget();
@@ -49,11 +72,11 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   late CallService _callService;
   late SIPUAHelper helper;
 
-  Call? get call => widget._call;
+  Call get call => widget.call;
 
-  bool get voiceOnly => call!.voiceOnly && !call!.remote_has_video;
+  bool get voiceOnly => call.voiceOnly && !call.remote_has_video;
 
-  String? get remoteIdentity => call!.remote_identity;
+  String? get remoteIdentity => call.remote_identity;
 
   @override
   void initState() {
@@ -64,11 +87,12 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   void didChangeDependencies() {
     super.didChangeDependencies();
     helper = ref.read(sipUAHelperProvider);
-    _initRenderers();
-    helper.addSipUaHelperListener(this);
-    _startTimer();
-    AppLogger.d('initState: call.direction = ${call!.direction}');
-    _callService = CallService(helper);
+    _initRenderers().then((_) {
+      helper.addSipUaHelperListener(this);
+      _startTimer();
+      AppLogger.d('initState: call.direction = ${call.direction}');
+      _callService = CallService(helper);
+    });
   }
 
   @override
@@ -91,7 +115,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
     });
   }
 
-  void _initRenderers() async {
+  Future<void> _initRenderers() async {
     if (_localRenderer != null) {
       await _localRenderer!.initialize();
     }
@@ -172,6 +196,12 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
         AppLogger.d('Call state updated: ${callState.state}');
         break;
     }
+
+    if (call.direction == 'incoming' && callState.state == CallStateEnum.PROGRESS) {
+      // Play ringtone/vibration here
+    } else {
+      // Do not play ringtone/vibration for outgoing calls
+    }
   }
 
   @override
@@ -190,29 +220,49 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   }
 
   void _backToDialPad() {
-    _timer.cancel();
-    Timer(Duration(seconds: 2), () {
-      Navigator.of(context).pop();
-    });
+    AppLogger.d('Attempting to navigate back to dial pad...');
+    try {
+      _timer.cancel();
+    } catch (e) {
+      AppLogger.w('Timer cancel failed or timer was not active: $e');
+    }
+    
     _cleanUp();
+    
+    // Use named route navigation instead of maybePop
+    if (mounted) {
+      AppLogger.d('Navigating to dialpad using named route...');
+      Navigator.of(context).pushReplacementNamed('/dialpad');
+    }
   }
 
   void _handleStreams(CallState event) async {
     MediaStream? stream = event.stream;
     if (event.originator == 'local') {
-      if (_localRenderer != null) {
+      if (_localRenderer != null && _localRenderer!.textureId != null) {
         _localRenderer!.srcObject = stream;
       }
 
-      if (!kIsWeb &&
-          !WebRTC.platformIsDesktop &&
+      // Only configure audio focus for outgoing calls
+      if (!kIsWeb && 
+          !WebRTC.platformIsDesktop && 
           event.stream?.getAudioTracks().isNotEmpty == true) {
-        event.stream?.getAudioTracks().first.enableSpeakerphone(false);
+        if (call.direction == 'outgoing') {
+          AppLogger.d('Configuring audio focus for outgoing call...');
+          final audioTrack = event.stream?.getAudioTracks().first;
+          audioTrack?.enableSpeakerphone(false);
+          if (Platform.isAndroid) {
+            audioTrack?.enabled = true;
+            // Set audio mode to communication to suppress system ringtone/vibration
+            final session = await AudioSession.instance;
+            await session.configure(AudioSessionConfiguration.speech());
+          }
+        }
       }
       _localStream = stream;
     }
     if (event.originator == 'remote') {
-      if (_remoteRenderer != null) {
+      if (_remoteRenderer != null && _remoteRenderer!.textureId != null) {
         _remoteRenderer!.srcObject = stream;
       }
       _remoteStream = stream;
@@ -236,7 +286,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   }
 
   void _handleHangup() {
-    call!.hangup({'status_code': 603});
+    call.hangup({'status_code': 603});
     _timer.cancel();
   }
 
@@ -258,25 +308,25 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
 
   void _muteAudio() {
     if (_audioMuted) {
-      call!.unmute(true, false);
+      call.unmute(true, false);
     } else {
-      call!.mute(true, false);
+      call.mute(true, false);
     }
   }
 
   void _muteVideo() {
     if (_videoMuted) {
-      call!.unmute(false, true);
+      call.unmute(false, true);
     } else {
-      call!.mute(false, true);
+      call.mute(false, true);
     }
   }
 
   void _handleHold() {
     if (_hold) {
-      call!.unhold();
+      call.unhold();
     } else {
-      call!.hold();
+      call.hold();
     }
   }
 
@@ -302,7 +352,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
             TextButton(
               child: Text('Ok'),
               onPressed: () {
-                call!.refer(_transferTarget);
+                call.refer(_transferTarget);
                 Navigator.of(context).pop();
               },
             ),
@@ -320,7 +370,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
 
   void _handleDtmf(String tone) {
     print('Dtmf tone => $tone');
-    call!.sendDTMF(tone);
+    call.sendDTMF(tone);
   }
 
   void _handleKeyPad() {
@@ -332,7 +382,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
   void _handleVideoUpgrade() {
     if (voiceOnly) {
       setState(() {
-        call!.voiceOnly = false;
+        call.voiceOnly = false;
       });
       helper.renegotiate(
           call: call!,
@@ -417,7 +467,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
     switch (_state) {
       case CallStateEnum.NONE:
       case CallStateEnum.CONNECTING:
-        if (call!.direction == 'INCOMING') {
+        if (call.direction == 'INCOMING') {
           basicActions.add(ActionButton(
             title: "Accept",
             fillColor: Colors.green,
@@ -649,7 +699,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: Text('[${call!.direction}] $_state'),
+        title: Text('[${call.direction}] $_state'),
       ),
       body: _buildContent(),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -688,7 +738,7 @@ class _MyCallScreenWidget extends ConsumerState<CallScreenWidget>
                 onPressed: () {
                   event.accept!.call({});
                   setState(() {
-                    call!.voiceOnly = false;
+                    call.voiceOnly = false;
                     _resizeLocalVideo();
                   });
                   Navigator.of(context).pop();

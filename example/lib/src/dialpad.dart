@@ -101,10 +101,10 @@ class _MyDialPadWidget extends ConsumerState<DialPadWidget>
         Navigator.pushNamed(context, '/callscreen', arguments: call);
         break;
       case CallStateEnum.FAILED:
-        reRegisterWithCurrentUser();
-        break;
       case CallStateEnum.ENDED:
-        reRegisterWithCurrentUser();
+        if (call.direction == 'incoming') {
+          reRegisterWithCurrentUser();
+        }
         break;
       default:
         break;

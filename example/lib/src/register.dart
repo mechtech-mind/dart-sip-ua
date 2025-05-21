@@ -37,20 +37,18 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   );
 
   final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _portController = TextEditingController();
   final TextEditingController _wsUriController = TextEditingController();
   final TextEditingController _sipUriController = TextEditingController();
   final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _authorizationUserController =
       TextEditingController();
+  final TextEditingController _portController = TextEditingController();
   final Map<String, String> _wsExtraHeaders = {
     // 'Origin': ' https://tryit.jssip.net',
     // 'Host': 'tryit.jssip.net:10443'
   };
   late SharedPreferences _preferences;
   late RegistrationState _registerState;
-
-  TransportType _selectedTransport = TransportType.TCP;
 
   late SipUserCubit currentUser;
   late SIPUAHelper helper;
@@ -60,6 +58,8 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   String? _currentUuid;
 
   late CallService callService;
+
+  TransportType _selectedTransport = TransportType.WS;
 
   @override
   void initState() {
@@ -75,10 +75,16 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
       helper = services.sipHelper;
       _registerState = helper.registerState;
       helper.addSipUaHelperListener(this);
-      _loadSettings();
-      if (kIsWeb) {
-        _selectedTransport = TransportType.WS;
-      }
+      _loadSettings().then((_) {
+        // Auto-register only if WS is selected and we have the required settings
+        if (!helper.registered &&
+            _selectedTransport == TransportType.WS &&
+            _wsUriController.text.isNotEmpty &&
+            _sipUriController.text.isNotEmpty) {
+          _logger.i('Auto-registering with saved settings (WS only)...');
+          _register(context);
+        }
+      });
     });
   }
 
@@ -90,6 +96,7 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
     _sipUriController.dispose();
     _displayNameController.dispose();
     _authorizationUserController.dispose();
+    _portController.dispose();
     super.dispose();
   }
 
@@ -100,7 +107,8 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
     _saveSettings();
   }
 
-  void _loadSettings() async {
+  Future<void> _loadSettings() async {
+    _logger.i('Loading saved SIP settings...');
     _preferences = await SharedPreferences.getInstance();
     setState(() {
       _portController.text = '5060';
@@ -113,7 +121,10 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
       _passwordController.text = _preferences.getString('password') ?? 'Awzvzhrd';
       _authorizationUserController.text =
           _preferences.getString('auth_user') ?? '3488';
+      // Always default to WS on load
+      _selectedTransport = TransportType.WS;
     });
+    _logger.i('Settings loaded - WS URI: ${_wsUriController.text}, SIP URI: ${_sipUriController.text}');
   }
 
   void _saveSettings() {
@@ -123,7 +134,6 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
     _logger.d('Auth User: ${_authorizationUserController.text}');
     _logger.d('Password: ${_passwordController.text}');
     
-    _preferences.setString('port', _portController.text);
     _preferences.setString('ws_uri', _wsUriController.text);
     _preferences.setString('sip_uri', _sipUriController.text);
     _preferences.setString('display_name', _displayNameController.text);
@@ -160,9 +170,13 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   }
 
   void _register(BuildContext context) {
-    if (_wsUriController.text == '') {
+    if (_selectedTransport == TransportType.WS && _wsUriController.text == '') {
       _logger.w('WebSocket URL is empty');
       _alert(context, "WebSocket URL");
+      return;
+    } else if (_selectedTransport == TransportType.TCP && _portController.text == '') {
+      _logger.w('Port is empty');
+      _alert(context, "Port");
       return;
     } else if (_sipUriController.text == '') {
       _logger.w('SIP URI is empty');
@@ -181,6 +195,7 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
 
     try {
       _logger.i('Attempting to register with SIP server...');
+      currentUser = ref.read(sipUserCubitProvider);
       currentUser.register(SipUser(
         wsUrl: _wsUriController.text,
         selectedTransport: _selectedTransport,
@@ -192,8 +207,8 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
         authUser: _authorizationUserController.text,
       ));
       _logger.i('Registration request sent successfully');
-    } catch (e) {
-      _logger.e('Error during registration: $e');
+    } catch (e, s) {
+      _logger.e('Error during registration: $e', error: e, stackTrace: s);
       _alert(context, "Registration failed: $e");
     }
   }
@@ -201,16 +216,19 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   @override
   void callStateChanged(Call call, CallState state) {
     _logger.d('Call state changed: $state');
-    _logger.d('Call direction: ${call.direction}');
-    _logger.d('Call state: ${state.state}');
+    _logger.d('Call direction: \\${call.direction}');
+    _logger.d('Call state: \\${state.state}');
     
+    // Only show CallKit notification for incoming calls
     if (state.state == CallStateEnum.CALL_INITIATION && call.direction == 'incoming') {
       // Auto-answer integration
       callService.handleIncomingSipCall(call);
       _logger.i('Incoming call detected, showing CallKit notification...');
       showIncomingCall();
+    } else if (call.direction == 'outgoing') {
+      _logger.d('Outgoing call: NOT showing CallKit notification.');
     } else {
-      _logger.d('Not showing CallKit notification - state: ${state.state}, direction: ${call.direction}');
+      _logger.d('Not showing CallKit notification - state: \\${state.state}, direction: \\${call.direction}');
     }
   }
 
@@ -235,6 +253,8 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
   }
 
   Future<void> showIncomingCall() async {
+    // Defensive: Only allow for incoming calls
+    _logger.d('showIncomingCall called. This should only be for incoming calls.');
     final _uuid = Uuid();
     final _currentUuid = _uuid.v4();
     _logger.i('showIncomingCall called, uuid: $_currentUuid');
@@ -375,13 +395,20 @@ class _MyRegisterWidget extends ConsumerState<RegisterWidget>
           ),
           SizedBox(height: 15),
           if (_selectedTransport == TransportType.WS) ...[
-            Text('WebSocket', style: TextStyle(color: textLabelColor)),
+            Text('WebSocket URL', style: TextStyle(color: textLabelColor)),
             SizedBox(height: 5),
             TextFormField(
               controller: _wsUriController,
               keyboardType: TextInputType.text,
               autocorrect: false,
               textAlign: TextAlign.center,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: textFieldFill,
+                border: border,
+                enabledBorder: border,
+                focusedBorder: border,
+              ),
             ),
           ],
           if (_selectedTransport == TransportType.TCP) ...[

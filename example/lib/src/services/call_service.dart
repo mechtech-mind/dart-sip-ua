@@ -83,23 +83,25 @@ class CallService {
 
   void _setupFCMListeners() {
     FirebaseMessaging.onMessage.listen((message) {
-      _logger.i('Got FCM message: ${message.data}');
+      _logger.i('Got FCM message: \\${message.data}');
       if (message.data['type'] == 'incoming_call') {
         showIncomingCall(
           callId: message.data['call_id'],
           callerName: message.data['caller_name'],
           callerNumber: message.data['caller_number'],
+          direction: 'incoming',
         );
       }
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      _logger.i('FCM message opened app: ${message.data}');
+      _logger.i('FCM message opened app: \\${message.data}');
       if (message.data['type'] == 'incoming_call') {
         showIncomingCall(
           callId: message.data['call_id'],
           callerName: message.data['caller_name'],
           callerNumber: message.data['caller_number'],
+          direction: 'incoming',
         );
       }
     });
@@ -110,8 +112,13 @@ class CallService {
     required String callerName,
     required String callerNumber,
     String? sipUri,
+    String direction = 'incoming',
   }) async {
-    _logger.i('[CallKit] showIncomingCall called with SIP call id: $callId, callerName: $callerName, callerNumber: $callerNumber, sipUri: $sipUri');
+    _logger.i('[CallKit] showIncomingCall called with SIP call id: $callId, callerName: $callerName, callerNumber: $callerNumber, sipUri: $sipUri, direction: $direction');
+    if (direction != 'incoming') {
+      _logger.w('[CallKit] Not showing CallKit notification for outgoing call.');
+      return;
+    }
     _logger.i('[CallKit] Showing incoming call for SIP call id: $callId');
     try {
       await FlutterCallkitIncoming.requestNotificationPermission({

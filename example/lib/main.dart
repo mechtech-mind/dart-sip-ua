@@ -21,6 +21,8 @@ import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart' as riverpod;
+import 'src/user_state/sip_user.dart';
+import 'src/services/fcm_service.dart';
 
 // Background message handler
 @pragma('vm:entry-point')
@@ -105,19 +107,20 @@ final sipUserCubitProvider = riverpod.Provider<SipUserCubit>(
 void main() async {
   final instanceId = Random().nextInt(1000000);
   AppLogger.i('Starting application initialization [InstanceID: $instanceId]');
-  
   try {
     AppLogger.d('Initializing Flutter bindings');
     WidgetsFlutterBinding.ensureInitialized();
-    
     AppLogger.d('Configuring logging levels');
     Logger.level = Level.debug;
-    
     if (WebRTC.platformIsDesktop) {
       AppLogger.d('Running on desktop platform, setting Fuchsia as target');
       debugDefaultTargetPlatformOverride = TargetPlatform.fuchsia;
     }
-    
+    // Initialize Firebase before using any Firebase services
+    await Firebase.initializeApp();
+    // Initialize FCM Service
+    final fcmService = FCMService();
+    await fcmService.initialize();
     AppLogger.i('Running application');
     runApp(
       riverpod.ProviderScope(
@@ -139,6 +142,7 @@ class MyApp extends riverpod.ConsumerStatefulWidget {
 
 class _MyAppState extends riverpod.ConsumerState<MyApp> {
   late Map<String, PageContentBuilder> routes;
+  bool _sipRegisteredOnLaunch = false;
 
   @override
   void initState() {
@@ -147,11 +151,37 @@ class _MyAppState extends riverpod.ConsumerState<MyApp> {
     _setupRoutes();
   }
 
+  Future<void> _autoRegisterSIP(riverpod.WidgetRef ref) async {
+    if (_sipRegisteredOnLaunch) return;
+    _sipRegisteredOnLaunch = true;
+    final prefs = await SharedPreferences.getInstance();
+    final wsUri = prefs.getString('ws_uri') ?? 'ws://94.130.104.22:8088/anatel/ws';
+    final sipUri = prefs.getString('sip_uri') ?? 'sip:3488@94.130.104.22';
+    final displayName = prefs.getString('display_name') ?? 'Flutter SIP UA';
+    final password = prefs.getString('password') ?? 'Awzvzhrd';
+    final authUser = prefs.getString('auth_user') ?? '3488';
+    final port = prefs.getString('port') ?? '5060';
+    if (wsUri.isNotEmpty && sipUri.isNotEmpty) {
+      final sipUserCubit = ref.read(sipUserCubitProvider);
+      sipUserCubit.register(SipUser(
+        wsUrl: wsUri,
+        selectedTransport: TransportType.WS,
+        wsExtraHeaders: const {},
+        sipUri: sipUri,
+        port: port,
+        displayName: displayName,
+        password: password,
+        authUser: authUser,
+      ));
+      AppLogger.i('Auto SIP registration triggered on app launch');
+    }
+  }
+
   void _setupRoutes() {
     routes = {
       '/': ([Object? arguments]) => const DialPadWidget(),
       '/register': ([Object? arguments]) => const RegisterWidget(),
-      '/callscreen': ([Object? arguments]) => CallScreenWidget(arguments as Call?),
+      '/callscreen': ([Object? arguments]) => CallScreenWidget(arguments as Call),
       '/about': ([Object? arguments]) => AboutWidget(),
     };
   }
@@ -183,42 +213,23 @@ class _MyAppState extends riverpod.ConsumerState<MyApp> {
     final theme = ref.watch(themeProvider);
     final servicesAsync = ref.watch(combinedServicesProvider);
 
+    servicesAsync.whenData((_) {
+      _autoRegisterSIP(ref);
+    });
+
     return MaterialApp(
       title: 'Dart SIP UA Example',
       theme: theme.currentTheme,
-      home: servicesAsync.when(
-        data: (_) => const DialPadWidget(),
-        loading: () => Scaffold(
-          body: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Initializing services...'),
-              ],
-            ),
-          ),
-        ),
-        error: (error, stack) => Scaffold(
-          body: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('Initialization Error:'),
-                Text(error.toString(), style: TextStyle(color: Colors.red)),
-                ElevatedButton(
-                  onPressed: () {
-                    ref.refresh(combinedServicesProvider);
-                  },
-                  child: Text('Retry'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-      onGenerateRoute: _onGenerateRoute,
+      routes: {
+        '/': (context) => const DialPadWidget(),
+        '/dialpad': (context) => const DialPadWidget(),
+        '/register': (context) => const RegisterWidget(),
+        '/callscreen': (context) {
+          final call = ModalRoute.of(context)!.settings.arguments as Call;
+          return CallScreenWidget(call);
+        },
+        '/about': (context) => AboutWidget(),
+      },
     );
   }
 }
