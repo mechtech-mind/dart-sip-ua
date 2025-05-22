@@ -11,6 +11,7 @@ import 'package:dart_sip_ua_example/src/services/call_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../main.dart';
 import 'services/service_providers.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'widgets/action_button.dart';
 
@@ -33,11 +34,13 @@ class _MyDialPadWidget extends ConsumerState<DialPadWidget>
 
   String? receivedMsg;
   late CallService callService;
+  String? _fcmToken;
 
   @override
   void initState() {
     super.initState();
     receivedMsg = "";
+    _fetchFcmToken();
   }
 
   @override
@@ -317,6 +320,20 @@ class _MyDialPadWidget extends ConsumerState<DialPadWidget>
     ];
   }
 
+  void _fetchFcmToken() async {
+    try {
+      String? token = await FirebaseMessaging.instance.getToken();
+      setState(() {
+        _fcmToken = token;
+      });
+      if (token != null) {
+        print('FCM Token: ' + token);
+      }
+    } catch (e) {
+      print('Error fetching FCM token: ' + e.toString());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     Color? textColor = Theme.of(context).textTheme.bodyMedium?.color;
@@ -392,6 +409,14 @@ class _MyDialPadWidget extends ConsumerState<DialPadWidget>
         padding: EdgeInsets.symmetric(horizontal: 12),
         children: <Widget>[
           SizedBox(height: 8),
+          if (_fcmToken != null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: SelectableText(
+                'FCM Token:\n$_fcmToken',
+                style: TextStyle(fontSize: 12, color: Colors.blueGrey),
+              ),
+            ),
           Center(
             child: Text(
               'Register Status: ${helper.registerState.state?.name ?? ''}',

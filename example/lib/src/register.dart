@@ -14,7 +14,7 @@ import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:uuid/uuid.dart';
 import 'package:dart_sip_ua_example/src/services/call_service.dart';
-import '../../main.dart';
+import 'package:dart_sip_ua_example/main.dart ';
 
 class RegisterWidget extends ConsumerStatefulWidget {
   const RegisterWidget({Key? key}) : super(key: key);

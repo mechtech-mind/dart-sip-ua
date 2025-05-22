@@ -27,73 +27,9 @@ import 'src/services/fcm_service.dart';
 // Background message handler
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  AppLogger.i('Handling background message: ${message.messageId}');
-  try {
-    await Firebase.initializeApp();
-    if (message.data['type'] == 'incoming_call') {
-      final callId = message.data['call_id'] ?? DateTime.now().millisecondsSinceEpoch.toString();
-      final params = CallKitParams(
-        id: callId,
-        nameCaller: message.data['caller_name'] ?? 'Unknown',
-        appName: 'SIP Call',
-        avatar: 'https://i.pravatar.cc/100',
-        handle: message.data['caller_number'] ?? 'Unknown',
-        type: 0,
-        textAccept: 'Accept',
-        textDecline: 'Decline',
-        missedCallNotification: NotificationParams(
-          showNotification: true,
-          isShowCallback: true,
-          subtitle: 'Missed call',
-          callbackText: 'Call back',
-        ),
-        callingNotification: NotificationParams(
-          showNotification: true,
-          isShowCallback: true,
-          subtitle: 'Calling...',
-          callbackText: 'Hang Up',
-        ),
-        duration: 30000,
-        extra: <String, dynamic>{
-          'sip_call_id': callId,
-          if (message.data['sip_uri'] != null) 'sip_uri': message.data['sip_uri'],
-        },
-        headers: <String, dynamic>{'platform': 'flutter'},
-        android: AndroidParams(
-          isCustomNotification: true,
-          isShowLogo: false,
-          ringtonePath: 'system_ringtone_default',
-          backgroundColor: '#0955fa',
-          backgroundUrl: 'https://i.pravatar.cc/500',
-          actionColor: '#4CAF50',
-          textColor: '#ffffff',
-          incomingCallNotificationChannelName: "Incoming Call",
-          missedCallNotificationChannelName: "Missed Call",
-          isShowCallID: false,
-        ),
-        ios: IOSParams(
-          iconName: 'CallKitLogo',
-          handleType: 'generic',
-          supportsVideo: true,
-          maximumCallGroups: 2,
-          maximumCallsPerCallGroup: 1,
-          audioSessionMode: 'default',
-          audioSessionActive: true,
-          audioSessionPreferredSampleRate: 44100.0,
-          audioSessionPreferredIOBufferDuration: 0.005,
-          supportsDTMF: true,
-          supportsHolding: true,
-          supportsGrouping: false,
-          supportsUngrouping: false,
-          ringtonePath: 'system_ringtone_default',
-        ),
-      );
-      await FlutterCallkitIncoming.showCallkitIncoming(params);
-      AppLogger.i('CallKit incoming call notification shown (background handler).');
-    }
-  } catch (e, stackTrace) {
-    AppLogger.e('Error in background handler', e, stackTrace);
-  }
+  await Firebase.initializeApp();
+  // Route through FCMService for unified handling (CallKit, etc.)
+  FCMService().handleIncomingMessage(message);
 }
 
 // Riverpod providers
@@ -121,6 +57,13 @@ void main() async {
     // Initialize FCM Service
     final fcmService = FCMService();
     await fcmService.initialize();
+
+    // Register the background handler for FCM (required for terminated/background state)
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // Optionally, create a notification channel for Android 8.0+
+    // See README or code comments for details on how to do this in Dart
+
     AppLogger.i('Running application');
     runApp(
       riverpod.ProviderScope(
