@@ -23,12 +23,15 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart' as riverpod;
 import 'src/user_state/sip_user.dart';
 import 'src/services/fcm_service.dart';
+import 'package:flutter/services.dart';
 
 // Background message handler
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  AppLogger.d('[FCM] Background handler triggered');
   await Firebase.initializeApp();
   // Route through FCMService for unified handling (CallKit, etc.)
+  AppLogger.d('[FCM] Handling message: \\${message.data}');
   FCMService().handleIncomingMessage(message);
 }
 
@@ -39,6 +42,37 @@ final themeProvider = riverpod.ChangeNotifierProvider<ThemeProvider>((ref) => Th
 final sipUserCubitProvider = riverpod.Provider<SipUserCubit>(
   (ref) => SipUserCubit(sipHelper: ref.watch(sipUAHelperProvider)),
 );
+
+@pragma('vm:entry-point')
+void backgroundEntryPoint() {
+  AppLogger.d('[CallService] Dart backgroundEntryPoint launched');
+  const MethodChannel('com.example.sip')
+    .setMethodCallHandler((call) async {
+      AppLogger.d('[CallService] MethodChannel received: \\${call.method}');
+      if (call.method == 'acceptIncomingCall') {
+        print("✅ Background accepting SIP call...");
+        AppLogger.d('[CallService] Attempting to answer incoming SIP call');
+        final sipHelper = SIPUAHelper();
+        // Fallback: try to answer a call with a common id or just log
+        final possibleIds = ['default', '1', 'incoming', 'call'];
+        bool answered = false;
+        for (final id in possibleIds) {
+          final sipCall = sipHelper.findCall(id);
+          if (sipCall != null && sipCall.direction == 'incoming') {
+            AppLogger.d('[CallService] Answering SIP call with id: $id');
+            sipCall.answer(sipHelper.buildCallOptions(true));
+            print('Answered SIP call with id: $id');
+            answered = true;
+            break;
+          }
+        }
+        if (!answered) {
+          AppLogger.d('[CallService] No incoming SIP call found with fallback ids.');
+          print('No incoming SIP call found with fallback ids. Please expose a getter in SIPUAHelper for all calls.');
+        }
+      }
+    });
+}
 
 void main() async {
   final instanceId = Random().nextInt(1000000);
@@ -53,12 +87,15 @@ void main() async {
       debugDefaultTargetPlatformOverride = TargetPlatform.fuchsia;
     }
     // Initialize Firebase before using any Firebase services
+    AppLogger.d('Initializing Firebase');
     await Firebase.initializeApp();
     // Initialize FCM Service
+    AppLogger.d('Initializing FCMService');
     final fcmService = FCMService();
     await fcmService.initialize();
 
     // Register the background handler for FCM (required for terminated/background state)
+    AppLogger.d('Registering FCM background handler');
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     // Optionally, create a notification channel for Android 8.0+
@@ -70,6 +107,16 @@ void main() async {
         child: MyApp(),
       ),
     );
+
+    AppLogger.d('Registering CallKit event handler');
+    FlutterCallkitIncoming.onEvent.listen((event) async {
+      AppLogger.d('[CallKit] Event received: \\${event?.event}');
+      if (event?.event == 'ACTION_CALL_ACCEPT') {
+        AppLogger.d('[CallKit] ACTION_CALL_ACCEPT received, starting CallService');
+        const platform = MethodChannel("com.example.control");
+        await platform.invokeMethod("startCallService");
+      }
+    });
   } catch (e, stackTrace) {
     AppLogger.e('Error during app initialization', e, stackTrace);
     rethrow;
